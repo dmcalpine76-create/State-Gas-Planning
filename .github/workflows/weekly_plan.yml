@@ -13,8 +13,14 @@ on:
       only:
         description: "What to run"
         type: choice
-        options: [all, board, plan]
+        options: [all, board, plan, pack]
         default: all
+      prior:
+        description: "Board pack: previous deck to roll forward from (optional, e.g. 2026-08-06)"
+        default: ""
+      meeting:
+        description: "Board pack: meeting date YYYY-MM-DD (optional)"
+        default: ""
 
 permissions:
   contents: write
@@ -35,7 +41,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install
-        run: pip install -q msal requests anthropic python-dotenv cryptography pynacl
+        run: pip install -q msal requests anthropic python-dotenv cryptography pynacl python-pptx python-docx
 
       # JSON round trip in Python: piping multi-line JSON through bash breaks MSAL.
       - name: Restore sign-in
@@ -60,7 +66,7 @@ jobs:
           BRIEFING_EMAIL_TO:  ${{ secrets.BRIEFING_EMAIL_TO }}
           GH_SECRETS_TOKEN:   ${{ secrets.GH_SECRETS_TOKEN }}
           WEEKLY_TOKEN_CACHE_ORIG: ${{ secrets.WEEKLY_TOKEN_CACHE }}
-        run: python weekly_plan.py run --days "${{ inputs.days || '7' }}" --only "${{ inputs.only || 'all' }}"
+        run: python weekly_plan.py run --days "${{ inputs.days || '7' }}" --only "${{ inputs.only || 'all' }}" --prior "${{ inputs.prior }}" --meeting "${{ inputs.meeting }}"
 
       # The page is encrypted; its key is only in the email link.
       - name: Publish the encrypted page

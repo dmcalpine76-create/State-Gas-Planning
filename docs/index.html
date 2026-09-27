@@ -126,11 +126,11 @@ summary{cursor:pointer;font-weight:700;padding:12px 0}
         </div>
       </div>
       <div class="row">
-        <div><h3>Monthly board pack</h3><p>Board briefing, Word report draft and the PowerPoint deck, saved in the planning folder.</p>
+        <div><h3>Monthly board pack</h3><p>Drafts the full board report in your template, rolled forward from your last final deck, plus a Word notes file with sources. Both land in the knowledge folder under board/packs/drafts. Runs in the cloud.</p>
           <div class="meta" id="meta-board_briefing"></div></div>
         <div class="controls">
           <label class="days" for="days-board_briefing">Days <input type="number" id="days-board_briefing" min="1" max="120" value="30"></label>
-          <button data-local="board_briefing" data-days="days-board_briefing">Run</button>
+          <button data-cloud="pack" data-days="days-board_briefing">Run</button>
         </div>
       </div>
     </div>
@@ -166,7 +166,8 @@ summary{cursor:pointer;font-weight:700;padding:12px 0}
   const CLOUD = {
     briefing: { repo: "morning-briefing", wf: "generate.yml", inputs: { reason: "Control Room re-run" }, meta: "meta-briefing" },
     wrap:     { repo: "morning-briefing", wf: "friday_wrap.yml", inputs: null, meta: "meta-wrap" },
-    weekly:   { repo: "State-Gas-Planning", wf: "weekly_plan.yml", inputs: {}, meta: "meta-weekly" },
+    weekly:   { repo: "State-Gas-Planning", wf: "weekly_plan.yml", base: {}, meta: "meta-weekly" },
+    pack:     { repo: "State-Gas-Planning", wf: "weekly_plan.yml", base: { only: "pack" }, meta: "meta-board_briefing" },
   };
   const LAUNCHER = "http://127.0.0.1:8765";
   const store = {
@@ -239,7 +240,7 @@ summary{cursor:pointer;font-weight:700;padding:12px 0}
     if (daysId) {
       const d = Number($(daysId).value);
       if (!(Number.isInteger(d) && d >= 1 && d <= 60)) { toast("Days must be a whole number from 1 to 60."); return; }
-      c.inputs = { days: String(d) };
+      c.inputs = { ...(c.base || {}), days: String(d) };
     }
     if (!store.get("ghToken")) { $("settings").open = true; $("gh-token").focus(); toast("Add your GitHub key in Settings first."); return; }
     btn.disabled = true;

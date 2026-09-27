@@ -574,6 +574,15 @@ def cmd_run(args):
         for n in remote.list("board/drafts"):
             if n.endswith(".json") and n[:10] >= cutoff:
                 remote.pull(f"board/drafts/{n}")
+        if args.only == "pack":
+            remote.pull("board/style/style_guide.md")
+            remote.pull("board/pack_lessons.json")
+            for n in remote.list("board/sent"):
+                remote.pull(f"board/sent/{n}")
+            decks = sorted(n for n in remote.list("board/packs")
+                           if n.endswith(".pptx") or n.endswith(".deck.json"))
+            for n in decks[-3:]:
+                remote.pull(f"board/packs/{n}")
         snaps = sorted(n for n in remote.list("snapshots") if n.endswith(".json"))
         prev_name = next((n for n in reversed(snaps) if n[:10] < today.isoformat()), None)
         if prev_name:
@@ -594,6 +603,9 @@ def cmd_run(args):
     snaps_local = sorted((store / "snapshots").glob("*.json")) if (store / "snapshots").exists() else []
     prev = next((json.loads(p.read_text(encoding="utf-8")) for p in reversed(snaps_local)
                  if p.stem < today.isoformat()), None)
+
+    if args.only == "pack":
+        return run_pack(args, token, store, remote, today)
 
     # 1. read the week
     with quiet():
@@ -704,12 +716,39 @@ def cmd_run(args):
     say("Done")
 
 
+def run_pack(args, token, store, remote, today):
+    """Monthly board pack: deck + Word bridge, into board/packs/drafts."""
+    import board_pack
+    from core import graph
+    from core.llm import get_client
+    days = args.days if args.days != 7 else 30
+    with quiet():
+        emails = graph.run_scan(token, days, max_per_folder=75, max_total=400,
+                                body_chars=1200, label="BOARD PACK")
+    start = datetime.datetime.combine(today, datetime.time(), AEST)
+    events = fetch_calendar(token, start, start + datetime.timedelta(days=45))
+    say(f"Read {len(emails)} emails and {len(events)} calendar entries")
+    with quiet():
+        out = board_pack.make_pack(token, get_client(), store, emails, events, say=lambda m: None,
+                                   prior_name=args.prior or None, meeting=args.meeting or None,
+                                   model=os.environ.get("BOARD_PACK_MODEL") or None)
+    say("Board pack drafted")
+    if remote:
+        for key in ("pptx", "docx", "spec"):
+            rel = out[key].relative_to(store).as_posix()
+            remote.push(rel, force_new=True)
+        say("Saved to the knowledge folder: board/packs/drafts")
+    say("Done (board pack)")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Sunday weekly planning run")
     ap.add_argument("command", choices=["setup", "run"])
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--email", action="store_true")
-    ap.add_argument("--only", choices=["all", "board", "plan"], default="all")
+    ap.add_argument("--only", choices=["all", "board", "plan", "pack"], default="all")
+    ap.add_argument("--prior", default="", help="board pack: roll forward from this deck (file name prefix)")
+    ap.add_argument("--meeting", default="", help="board pack: meeting date YYYY-MM-DD")
     args = ap.parse_args()
     try:
         (cmd_setup if args.command == "setup" else cmd_run)(args)
