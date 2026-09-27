@@ -12,6 +12,7 @@ Command Prompt window, exactly as if you had typed the command yourself.
 """
 import os
 import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import json
 import secrets
 import datetime
@@ -27,7 +28,7 @@ APP_URL  = "https://dmcalpine76-create.github.io/State-Gas-Planning/"
 ALLOWED  = {"https://dmcalpine76-create.github.io"}
 KEY_FILE = HERE / "launcher_key.txt"
 LOG_FILE = HERE / "launcher.log"
-VERSION  = "1"
+VERSION  = "2"
 
 
 def _python() -> str:
@@ -38,19 +39,11 @@ def _python() -> str:
     return str(exe)
 
 
-# The only things the launcher will ever run. {py} = python, {days} = the
-# lookback the app sent, checked to be a whole number from 1 to 120.
-TOOLS = {
-    "inbox":          {"title": "Inbox actions",
-                       "cmd": '"{py}" inbox_actions.py run --days {days}'},
-    "inbox_review":   {"title": "Inbox actions review",
-                       "cmd": '"{py}" inbox_actions.py review'},
-    "board_update":   {"title": "Weekly board update",
-                       "cmd": '"{py}" board_update.py run --days {days}'},
-    "board_briefing": {"title": "Monthly board briefing",
-                       "cmd": '"{py}" board_briefing.py run --days {days} --docx'
-                              ' && node generate_board_deck.js --data board_report_data.json'},
-}
+def _tools() -> dict:
+    """Fixed list of tools, from launcher_tools.py, re-read on each request."""
+    import importlib
+    import launcher_tools
+    return importlib.reload(launcher_tools).TOOLS
 
 
 def load_key() -> str:
@@ -78,7 +71,7 @@ def log(msg: str):
 
 
 def build_command(tool: str, days) -> str:
-    spec = TOOLS.get(tool)
+    spec = _tools().get(tool)
     if not spec:
         raise ValueError("unknown tool")
     if "{days}" in spec["cmd"]:
@@ -94,7 +87,7 @@ def build_command(tool: str, days) -> str:
 
 def launch(tool: str, days) -> None:
     cmd = build_command(tool, days)
-    title = TOOLS[tool]["title"]
+    title = _tools()[tool]["title"]
     if os.name == "nt":
         # A new, visible Command Prompt that stays open when the tool ends,
         # so you can read what it did - same as running it by hand.
@@ -159,7 +152,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self._origin_ok():
                 return self._json(403, {"ok": False})
             return self._json(200, {"ok": True, "version": VERSION,
-                                    "tools": sorted(TOOLS)})
+                                    "tools": sorted(_tools())})
         if path == "/pair":
             # Opened by you from the app: sends you back to the app with the
             # key in the part of the address that never leaves your browser.

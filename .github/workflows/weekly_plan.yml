@@ -1,0 +1,68 @@
+# Sunday weekly plan - 4:47pm AEST Sunday (06:47 UTC), ready by 5pm.
+# Run logs are public: weekly_plan.py prints counts only, never content.
+name: Sunday weekly plan
+
+on:
+  schedule:
+    - cron: "47 6 * * 0"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Days of email to read"
+        default: "7"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: weekly-plan
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -q msal requests anthropic python-dotenv cryptography pynacl
+
+      # JSON round trip in Python: piping multi-line JSON through bash breaks MSAL.
+      - name: Restore sign-in
+        env:
+          WEEKLY_TOKEN_CACHE: ${{ secrets.WEEKLY_TOKEN_CACHE }}
+        run: |
+          python - <<'PY'
+          import os, json, sys
+          raw = os.environ.get("WEEKLY_TOKEN_CACHE", "")
+          if not raw:
+              sys.exit("No sign-in stored yet: press 'Sign in for the Sunday run' in the Control Room.")
+          open(".weekly_token_cache.bin", "w", encoding="utf-8").write(json.dumps(json.loads(raw)))
+          print("Sign-in restored")
+          PY
+
+      - name: Weekly plan
+        env:
+          CI: "true"
+          ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
+          OUTLOOK_CLIENT_ID:  ${{ secrets.OUTLOOK_CLIENT_ID }}
+          OUTLOOK_TENANT_ID:  ${{ secrets.OUTLOOK_TENANT_ID }}
+          BRIEFING_EMAIL_TO:  ${{ secrets.BRIEFING_EMAIL_TO }}
+          GH_SECRETS_TOKEN:   ${{ secrets.GH_SECRETS_TOKEN }}
+          WEEKLY_TOKEN_CACHE_ORIG: ${{ secrets.WEEKLY_TOKEN_CACHE }}
+        run: python weekly_plan.py run --days "${{ inputs.days || '7' }}"
+
+      # The page is encrypted; its key is only in the email link.
+      - name: Publish the encrypted page
+        run: |
+          if ls weekly/*.html >/dev/null 2>&1; then
+            git config user.name "weekly-plan"
+            git config user.email "actions@users.noreply.github.com"
+            git add -f weekly/*.html
+            git commit -q -m "Weekly plan $(date -u +%F)" && git push -q
+          fi

@@ -89,9 +89,13 @@ summary{cursor:pointer;font-weight:700;padding:12px 0}
           <div class="meta" id="meta-wrap">Last run: checking</div></div>
         <div class="controls"><button data-cloud="wrap">Re-run now</button></div>
       </div>
-      <div class="row soon">
-        <div><h3>Sunday weekly plan <span class="tag">Phase 2</span></h3><p>Sundays at 5pm: consolidates the week into the knowledge base and plans the next one.</p></div>
-        <div class="controls"><button disabled>Not built yet</button></div>
+      <div class="row">
+        <div><h3>Sunday weekly plan</h3><p>Sundays at 5pm: brings the knowledge base up to date and plans your week. Arrives by email with a link to the plan.</p>
+          <div class="meta" id="meta-weekly">Last run: checking</div></div>
+        <div class="controls">
+          <label class="days" for="days-weekly">Days <input type="number" id="days-weekly" min="1" max="60" value="7"></label>
+          <button data-cloud="weekly" data-days="days-weekly">Run now</button>
+        </div>
       </div>
     </div>
   </section>
@@ -107,6 +111,11 @@ summary{cursor:pointer;font-weight:700;padding:12px 0}
           <button data-local="inbox" data-days="days-inbox">Run</button>
           <button class="ghost" data-local="inbox_review">Reopen review</button>
         </div>
+      </div>
+      <div class="row">
+        <div><h3>Plan diary blocks</h3><p>Opens your scheduling dashboard to book time in Outlook for this week's tasks, including blocks suggested by the Sunday plan.</p>
+          <div class="meta" id="meta-diary"></div></div>
+        <div class="controls"><button data-local="diary">Open</button></div>
       </div>
       <div class="row">
         <div><h3>Weekly board update</h3><p>Drafts this week's update to directors and saves it as an Outlook draft.</p>
@@ -136,6 +145,11 @@ summary{cursor:pointer;font-weight:700;padding:12px 0}
         <div class="pair"><a class="btn" href="http://127.0.0.1:8765/pair">Pair with launcher</a><button class="ghost" id="unpair">Forget pairing</button></div>
       </div>
       <div>
+        <strong>Sunday run sign-in</strong>
+        <p>The Sunday plan runs in the cloud and needs its own Microsoft sign-in, including access to your knowledge folder in OneDrive. Do this once, and again if the Sunday email says the sign-in has expired.</p>
+        <div class="pair"><button data-local="weekly_setup">Sign in for the Sunday run</button></div>
+      </div>
+      <div>
         <label for="gh-token"><strong>GitHub key</strong></label>
         <p>Needed only for the Re-run buttons. A fine-grained token limited to your repositories with Actions: read and write. It is kept in this browser only.</p>
         <input type="password" id="gh-token" autocomplete="off" placeholder="github_pat_…">
@@ -152,6 +166,7 @@ summary{cursor:pointer;font-weight:700;padding:12px 0}
   const CLOUD = {
     briefing: { repo: "morning-briefing", wf: "generate.yml", inputs: { reason: "Control Room re-run" }, meta: "meta-briefing" },
     wrap:     { repo: "morning-briefing", wf: "friday_wrap.yml", inputs: null, meta: "meta-wrap" },
+    weekly:   { repo: "State-Gas-Planning", wf: "weekly_plan.yml", inputs: {}, meta: "meta-weekly" },
   };
   const LAUNCHER = "http://127.0.0.1:8765";
   const store = {
@@ -220,6 +235,12 @@ summary{cursor:pointer;font-weight:700;padding:12px 0}
 
   async function runCloud(key, btn){
     const c = CLOUD[key];
+    const daysId = btn.dataset.days;
+    if (daysId) {
+      const d = Number($(daysId).value);
+      if (!(Number.isInteger(d) && d >= 1 && d <= 60)) { toast("Days must be a whole number from 1 to 60."); return; }
+      c.inputs = { days: String(d) };
+    }
     if (!store.get("ghToken")) { $("settings").open = true; $("gh-token").focus(); toast("Add your GitHub key in Settings first."); return; }
     btn.disabled = true;
     try {
@@ -267,8 +288,8 @@ summary{cursor:pointer;font-weight:700;padding:12px 0}
   $("clear-token").onclick = () => { store.set("ghToken",""); toast("GitHub key removed."); lastRuns(); };
   $("unpair").onclick = () => { store.set("launcherKey",""); toast("Pairing forgotten."); checkLaptop(); };
 
-  for (const t of ["inbox","board_update","board_briefing"]) { const s=store.get("started-"+t); if (s) $("meta-"+t).textContent = "Last started " + s; }
-  for (const id of ["days-inbox","days-board_update","days-board_briefing"]) {
+  for (const t of ["inbox","board_update","board_briefing","diary"]) { const s=store.get("started-"+t); if (s) $("meta-"+t).textContent = "Last started " + s; }
+  for (const id of ["days-inbox","days-board_update","days-board_briefing","days-weekly"]) {
     const v = store.get(id); if (v) $(id).value = v;
     $(id).addEventListener("change", () => store.set(id, $(id).value));
   }
