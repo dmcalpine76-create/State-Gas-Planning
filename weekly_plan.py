@@ -42,7 +42,7 @@ CACHE_FILE = HERE / ".weekly_token_cache.bin"
 TASK_LIST  = "Daily Priorities"
 SITE       = "https://dmcalpine76-create.github.io/State-Gas-Planning"
 REPO       = "dmcalpine76-create/State-Gas-Planning"
-PUBLISH_DIR = HERE / "weekly"
+PUBLISH_DIR = HERE / "docs" / "weekly"   # Pages publishes docs/
 
 
 def say(msg: str):
