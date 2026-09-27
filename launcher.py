@@ -28,7 +28,7 @@ APP_URL  = "https://dmcalpine76-create.github.io/State-Gas-Planning/"
 ALLOWED  = {"https://dmcalpine76-create.github.io"}
 KEY_FILE = HERE / "launcher_key.txt"
 LOG_FILE = HERE / "launcher.log"
-VERSION  = "2"
+VERSION  = "3"
 
 
 def _python() -> str:
@@ -100,8 +100,10 @@ def launch(tool: str, days) -> None:
 class Handler(BaseHTTPRequestHandler):
     key = ""
 
-    def log_message(self, *a):          # keep the console quiet
-        pass
+    def log_message(self, fmt, *a):
+        # One line per request, so a button that "does nothing" can be traced.
+        log(f"{self.command} {urlparse(self.path).path} from {self.headers.get('Origin', '-')}: "
+            + (fmt % a))
 
     def _origin_ok(self) -> bool:
         return self.headers.get("Origin", "") in ALLOWED
