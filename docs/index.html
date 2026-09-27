@@ -132,7 +132,7 @@ summary{cursor:pointer;font-weight:700;padding:12px 0}
     <div class="settings">
       <div>
         <strong>Laptop launcher</strong>
-        <p>Lets the buttons above start tools on your PC. Install it once by running <em>install_launcher.bat</em> in the state gas planning folder; it pairs itself with this page. To pair again, make sure it is running and press Pair.</p>
+        <p>Lets the buttons above start tools on your PC. Start it by double-clicking <em>Control Room launcher</em> in the state gas planning folder; it pairs itself with this page. To pair again, make sure it is running and press Pair.</p>
         <div class="pair"><a class="btn" href="http://127.0.0.1:8765/pair">Pair with launcher</a><button class="ghost" id="unpair">Forget pairing</button></div>
       </div>
       <div>
@@ -253,7 +253,7 @@ summary{cursor:pointer;font-weight:700;padding:12px 0}
       } else toast(j.error ? cap(j.error) + "." : "The launcher refused the request.");
     } catch {
       chip("chip-laptop","bad","Laptop: launcher not running");
-      toast("Your laptop isn't answering. Is it on, with the launcher running? Run install_launcher.bat once to fix.");
+      toast("Your laptop isn't answering. Is it on, with the launcher running? Double-click Control Room launcher in the state gas planning folder.");
     } finally { btn.disabled = false; }
   }
   const cap = s => s.charAt(0).toUpperCase() + s.slice(1);

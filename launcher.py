@@ -7,7 +7,7 @@ fixed list of tools, only when asked by your control app's page, and only
 with the pairing key held in launcher_key.txt. Each tool opens in its own
 Command Prompt window, exactly as if you had typed the command yourself.
 
-  py launcher.py            run it (install_launcher.bat starts it at login)
+  py launcher.py            run it ("Control Room launcher.pyw" starts it without a window)
   py launcher.py --test     self-test, starts nothing
 """
 import os
