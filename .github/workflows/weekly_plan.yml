@@ -10,6 +10,11 @@ on:
       days:
         description: "Days of email to read"
         default: "7"
+      only:
+        description: "What to run"
+        type: choice
+        options: [all, board, plan]
+        default: all
 
 permissions:
   contents: write
@@ -55,7 +60,7 @@ jobs:
           BRIEFING_EMAIL_TO:  ${{ secrets.BRIEFING_EMAIL_TO }}
           GH_SECRETS_TOKEN:   ${{ secrets.GH_SECRETS_TOKEN }}
           WEEKLY_TOKEN_CACHE_ORIG: ${{ secrets.WEEKLY_TOKEN_CACHE }}
-        run: python weekly_plan.py run --days "${{ inputs.days || '7' }}"
+        run: python weekly_plan.py run --days "${{ inputs.days || '7' }}" --only "${{ inputs.only || 'all' }}"
 
       # The page is encrypted; its key is only in the email link.
       - name: Publish the encrypted page

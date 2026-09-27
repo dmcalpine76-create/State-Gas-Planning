@@ -495,6 +495,7 @@ def render(a, p, patch, stats, today) -> str:
 <section><h2>Knowledge base this week</h2><div class="card"><div class="item">
 <span>{stats["updated"]} matters updated · {stats["new"]} new · {stats["closed"]} closed · {stats["deadlines"]} deadlines added ·
 {stats["emails"]} emails, {len(a["open"])} open tasks and {sum(d["meetings"] for d in a["week"])} meetings read</span></div>
+{'<div class="item"><b>Board update drafted</b><span>' + str(stats["board"]) + ' matters, waiting in Outlook Drafts. Review notes are in the knowledge folder under board/drafts.</span></div>' if stats.get("board") is not None else ''}
 <details><summary>Done this week ({len(a["done"])})</summary><ul>{done}</ul></details></div></section>
 <footer>Generated {datetime.datetime.now(AEST):%a %d %b %Y %H:%M} AEST. A copy is kept in your
 state gas knowledge folder under weekly.</footer></div></body></html>"""
@@ -567,6 +568,12 @@ def cmd_run(args):
         remote = OneDriveStore(token, os.environ.get("STORE_DRIVE_PATH", DEFAULT_PATH), tmp)
         for f in STORE_FILES:
             remote.pull(f, required=f == "matters.json")
+        for f in ("board/lessons.json", "board/directors.json"):
+            remote.pull(f)
+        cutoff = (today - datetime.timedelta(days=30)).isoformat()
+        for n in remote.list("board/drafts"):
+            if n.endswith(".json") and n[:10] >= cutoff:
+                remote.pull(f"board/drafts/{n}")
         snaps = sorted(n for n in remote.list("snapshots") if n.endswith(".json"))
         prev_name = next((n for n in reversed(snaps) if n[:10] < today.isoformat()), None)
         if prev_name:
@@ -576,7 +583,7 @@ def cmd_run(args):
         say(f"Knowledge store copied down ({len(remote.hashes)} files)")
 
     with quiet():
-        from core.config import STORE_DIR
+        from core.config import STORE_DIR, VOICE_RULES, COMPANY_NAME, MD_NAME, MD_TITLE
         from core.knowledge import CompanyKnowledge
         from core import graph
         from core.llm import get_client
@@ -590,8 +597,8 @@ def cmd_run(args):
 
     # 1. read the week
     with quiet():
-        emails = graph.run_scan(token, args.days, max_per_folder=60, max_total=300,
-                                body_chars=700, label="WEEKLY PLAN")
+        emails = graph.run_scan(token, args.days, max_per_folder=75, max_total=400,
+                                body_chars=1200, label="WEEKLY PLAN")
     tasks = fetch_tasks(token)
     start = datetime.datetime.combine(today - datetime.timedelta(days=7), datetime.time(), AEST)
     events = fetch_calendar(token, start, start + datetime.timedelta(days=22))
@@ -603,6 +610,35 @@ def cmd_run(args):
     instr_path = store / "instructions.md"
     instructions = instr_path.read_text(encoding="utf-8") if instr_path.exists() else ""
     client = get_client()
+
+    def do_board():
+        import board_weekly as bw
+        result = None
+        try:
+            with quiet():
+                result = bw.make_update(token, client, store, emails, args.days, VOICE_RULES,
+                                        COMPANY_NAME, MD_NAME, MD_TITLE, instructions, say=lambda m: None)
+            say(f"Board update draft in Outlook: {len(result['items'])} matters, "
+                f"{result['sent_found']} past updates read, {result['lessons_added']} new lessons")
+        except Exception as ex:
+            say(f"!! Board update step failed: {type(ex).__name__}")
+            if not CLOUD:
+                raise
+        if remote:
+            for f in ("board/lessons.json", "board/directors.json"):
+                remote.push(f)
+            for sub in ("board/drafts", "board/sent"):
+                d = store / sub
+                if d.exists():
+                    for fp in d.iterdir():
+                        rel = f"{sub}/{fp.name}"
+                        remote.push(rel, force_new=rel not in remote.hashes)
+        return result
+
+    if args.only == "board":
+        do_board()
+        say("Done (board update only)")
+        return
 
     # 2. bring the knowledge up to date
     a0 = analyse(tasks, events, prev, deadlines, ck.data["matters"], today)
@@ -620,12 +656,14 @@ def cmd_run(args):
              "deadlines": added, "emails": len(emails)}
     say(f"Knowledge updated: {stats['updated']} matters, {stats['new']} new, "
         f"{stats['closed']} closed, {added} deadlines added")
+    board = do_board() if args.only == "all" else None
 
     # 3. plan the week
     a = analyse(tasks, events, prev, deadlines, ck.data["matters"], today)
     p = plan(client, a, instructions, patch.get("confirm", []), today)
     say(f"Plan written: {len(p.get('priorities', []))} priorities, "
         f"{len(p.get('diary_blocks', []))} diary blocks")
+    stats["board"] = len(board["items"]) if board else None
     html_text = render(a, p, patch, stats, today)
 
     # 4. keep it: plan + this week's task snapshot in the store
@@ -671,6 +709,7 @@ def main():
     ap.add_argument("command", choices=["setup", "run"])
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--email", action="store_true")
+    ap.add_argument("--only", choices=["all", "board", "plan"], default="all")
     args = ap.parse_args()
     try:
         (cmd_setup if args.command == "setup" else cmd_run)(args)
