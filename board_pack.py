@@ -247,6 +247,31 @@ Respond with JSON only:
     return _call(client, prompt, 6000, f"page: {page['title'][:30]}", model)
 
 
+def _words(paras):
+    return sum(len((p.get("text") or "").split()) for p in paras)
+
+
+def tighten(client, ctx, what, content, limit_note, model=None):
+    """An editor's pass: same structure, board altitude, within the length limit."""
+    prompt = f"""You are the Managing Director's editor, preparing his board paper. His style guide:
+
+{ctx["guide"][:6000]}
+
+Edit this {what} so it reads as he would write it to his board. Keep the JSON structure and
+keys exactly. {limit_note}
+- Remove staff, junior, contractor and counterparty contact names (keep organisations and
+  roles), reference numbers, email and meeting mechanics, and any remark about an individual.
+- Keep every judgement, number, risk and ask. Cut chronology and process detail first.
+- Keep [confirm] markers. Do not add facts.
+
+CONTENT:
+{json.dumps(content, ensure_ascii=False)}
+
+Respond with the edited JSON only."""
+    out = _call(client, prompt, 6000, f"edit: {what[:30]}", model)
+    return out if isinstance(out, dict) and out else content
+
+
 def next_meeting(events, today):
     for e in events:
         if "board" in e["subject"].lower() and "meeting" in e["subject"].lower() and e["start"][:10] >= today.isoformat():
@@ -314,8 +339,23 @@ def make_pack(token, client, store: Path, emails: list, events: list, say=print,
         raise RuntimeError("planning step returned nothing")
     for pg in plan.get("strategy_pages", []):
         pg["title"] = _strip_num(pg.get("title", ""))
+    ed = tighten(client, ctx, "executive summary",
+                 {"headlines": plan.get("headlines", []), "boxes": plan["boxes"]},
+                 "Headlines: at most 5, each one sentence under 30 words. Boxes: 3-5 bullets each, "
+                 "each under 25 words.", model)
+    if ed.get("boxes"):
+        plan["headlines"], plan["boxes"] = ed.get("headlines", plan.get("headlines", [])), ed["boxes"]
     op = op_plan(client, ctx, meeting_date, model)
-    pages_out = [strategy_page(client, ctx, meeting_date, pg, model) for pg in plan.get("strategy_pages", [])[:7]]
+    pages_out = []
+    for pg in plan.get("strategy_pages", [])[:7]:
+        res = strategy_page(client, ctx, meeting_date, pg, model)
+        limit = 200 if pg.get("image_note") else (120 if res.get("table") else 320)
+        if res.get("paras") and _words(res["paras"]) > limit * 1.1:
+            e = tighten(client, ctx, f"board page '{pg['title']}'", {"paras": res["paras"]},
+                        f"The bullets must total no more than {limit} words so the page fits one slide.", model)
+            if e.get("paras"):
+                res["paras"] = e["paras"]
+        pages_out.append(res)
     om = other_matters(client, ctx, meeting_date, [p["title"] for p in plan.get("strategy_pages", [])], model)
 
     spec = {"meeting_date": meeting_date,
