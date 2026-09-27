@@ -162,7 +162,10 @@ TASK: plan this month's report and write the Executive Summary and cashflow comm
   {json.dumps(prior_pages, ensure_ascii=False)} - carry each forward unless it is clearly resolved.
   Where capital raising, funding or corporate strategy is live, include a Capital Management /
   Strategy page - it is usually his lead paper. Add new pages only where the evidence demands.
-  Titles without numbers. For each give a title in his
+  Titles without numbers, under 55 characters. Put the lead paper (usually capital) first.
+- Any matter important enough for its own strategy page and still live should normally also
+  have an Executive Summary box; a box whose matter is resolved should be dropped or folded
+  into a headline. For each give a title in his
   style, its purpose (what the board needs from it), the format (narrative, or narrative plus
   table, or table), and image_note if a map, chart or model extract belongs on it.
 - cashflow: title and 5-9 commentary bullets rolled forward from last month's, changing only
@@ -210,8 +213,8 @@ MATTERS ALREADY COVERED ON THEIR OWN PAGES THIS MONTH (leave these out): {json.d
 TASK: write this month's Other matters table. Carry forward EVERY row from last month's table
 (same Area and Matter wording), updating it - if nothing has moved say so briefly. Drop a row
 only if it is clearly closed or now has its own page, and list any dropped row in "dropped"; add board-relevant matters from
-the evidence that have no page of their own. Usually 5 to 10 rows. Update is 2-5 sentences of
-substance and view in his voice; Next Steps concrete; Risk Nil/Low/Med/High; Action Nil,
+the evidence that have no page of their own. Usually 5 to 10 rows. Update is 2-3 sentences (under
+60 words) of substance and view in his voice; Next Steps under 30 words; Next Steps concrete; Risk Nil/Low/Med/High; Action Nil,
 Note, Discuss or Decision.
 
 Respond with JSON only:
@@ -330,8 +333,12 @@ def make_pack(token, client, store: Path, emails: list, events: list, say=print,
     store = Path(store)
     today = datetime.date.today()
     ctx = gather(store, prior_name)
-    ctx["email"] = build_email_context(emails)
     md = datetime.date.fromisoformat(meeting) if meeting else (next_meeting(events, today) or today)
+    if md < today:   # re-drafting a past meeting: only what was known before it
+        cut = md.isoformat()
+        emails = [m for m in emails if (m.get("receivedDateTime") or m.get("sentDateTime") or "")[:10] < cut]
+        ctx["sent"] = [x for x in ctx["sent"] if x["date"] < cut]
+    ctx["email"] = build_email_context(emails)
     meeting_date = f"{md.day} {md:%B %Y}"
 
     plan = plan_and_summary(client, ctx, meeting_date, model)

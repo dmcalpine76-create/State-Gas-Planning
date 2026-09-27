@@ -23,7 +23,7 @@ GREY_FILL = RGBColor(0xF2, 0xF2, 0xF2)
 INK = RGBColor(0x1A, 0x1A, 0x1A)
 MUTED = RGBColor(0x80, 0x80, 0x80)
 BODY_TOP, BODY_BOTTOM = 0.47, 5.30          # usable band between title and footer
-CH_PER_IN = {7: 24.0, 8: 21.0, 9: 19.0, 10: 16.5}   # rough Georgia Pro Light widths
+CH_PER_IN = {7: 21.0, 8: 18.5, 9: 16.5, 10: 14.5}   # conservative Georgia Pro Light widths
 LINE_IN = {7: 0.12, 8: 0.135, 9: 0.15, 10: 0.17}
 
 
@@ -35,6 +35,14 @@ def _lines(text, width_in, pt):
 def text_height(paras, width_in, pt):
     return sum(_lines(("    " * p.get("level", 0)) + p["text"], width_in - 0.25 * p.get("level", 0), pt)
                for p in paras) * LINE_IN[pt] + 0.04 * len(paras) + 0.1
+
+
+def fit_pt(paras, width_in, height_in, sizes=(9, 8, 7)):
+    """Largest font size at which the paragraphs fit the box."""
+    for pt in sizes:
+        if text_height(paras, width_in, pt) <= height_in:
+            return pt
+    return sizes[-1]
 
 
 class Deck:
@@ -97,7 +105,7 @@ class Deck:
         title = re.sub(r"^\s*(\d+(\.\d+)*)\.?\s+", "", title or "").strip()
         label = f"{number}." if number and "." not in str(number) else str(number or "")
         self._box(s, 0.40, 0.08, 8.2, 0.26, [{"text": f"{label}\t{title}" if label else title, "bullet": False}],
-                  pt=14, bold=True)
+                  pt=14 if len(title) <= 55 else 12 if len(title) <= 68 else 11, bold=True)
         bar = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(0.40), Inches(0.37), Inches(0.51), Inches(0.03))
         bar.fill.solid(); bar.fill.fore_color.rgb = CRIMSON; bar.line.fill.background()
 
@@ -173,7 +181,7 @@ class Deck:
         s = self._slide()
         self._title(s, number, "Executive Summary")
         hp = [{"text": t} for t in headlines]
-        hh = min(1.6, text_height(hp, 9.28, 8))
+        hh = min(1.3, text_height(hp, 9.28, 8))
         self._box(s, 0.40, 0.47, 9.28, hh, hp, pt=8)
         top = 0.47 + hh + 0.06
         n = max(1, len(boxes))
@@ -181,22 +189,32 @@ class Deck:
         rows = math.ceil(n / cols)
         gap = 0.10
         bw = (9.44 - gap * (cols - 1)) / cols
-        bh = (BODY_BOTTOM - top - gap * (rows - 1)) / rows
-        for i, b in enumerate(boxes):
-            r, c = divmod(i, cols)
-            if i == n - 1 and n % 2 == 1 and cols == 2:   # odd last box spans the row
-                c, w = 0, 9.44
-            else:
-                w = bw
-            x, y = 0.31 + c * (bw + gap), top + r * (bh + gap)
-            frame = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(x), Inches(y), Inches(w), Inches(bh))
-            frame.fill.solid(); frame.fill.fore_color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-            frame.line.color.rgb = GREY_LINE
-            head = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(x), Inches(y), Inches(w), Inches(0.26))
-            head.fill.solid(); head.fill.fore_color.rgb = GREY_LINE; head.line.fill.background()
-            self._box(s, x + 0.08, y, w - 0.16, 0.26, [{"text": b["title"], "bullet": False}],
-                      pt=10, bold=True, anchor=MSO_ANCHOR.MIDDLE)
-            self._box(s, x + 0.05, y + 0.30, w - 0.10, bh - 0.32, [{"text": t} for t in b["bullets"]], pt=8)
+        avail = BODY_BOTTOM - top - gap * (rows - 1)
+        need = []
+        for r in range(rows):
+            grp = boxes[r * cols:(r + 1) * cols]
+            wid = 9.44 if len(grp) == 1 else bw
+            need.append(max(text_height([{"text": t} for t in b["bullets"]], wid - 0.1, 8) + 0.32 for b in grp))
+        scale = avail / sum(need)
+        heights = [h * scale for h in need]
+        y = top
+        for r in range(rows):
+            grp = boxes[r * cols:(r + 1) * cols]
+            bh = heights[r]
+            for c, b in enumerate(grp):
+                w = 9.44 if len(grp) == 1 else bw
+                x = 0.31 + c * (bw + gap)
+                frame = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(x), Inches(y), Inches(w), Inches(bh))
+                frame.fill.solid(); frame.fill.fore_color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+                frame.line.color.rgb = GREY_LINE
+                head = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(x), Inches(y), Inches(w), Inches(0.26))
+                head.fill.solid(); head.fill.fore_color.rgb = GREY_LINE; head.line.fill.background()
+                self._box(s, x + 0.08, y, w - 0.16, 0.26, [{"text": b["title"], "bullet": False}],
+                          pt=10, bold=True, anchor=MSO_ANCHOR.MIDDLE)
+                bp = [{"text": t} for t in b["bullets"]]
+                self._box(s, x + 0.05, y + 0.30, w - 0.10, bh - 0.32, bp,
+                          pt=fit_pt(bp, w - 0.10, bh - 0.32, (8, 7)))
+            y += bh + gap
         return s
 
     def op_plan(self, number, title, columns, rows):
@@ -209,11 +227,14 @@ class Deck:
 
     def narrative(self, number, title, paras, table=None, image_note=None, intro=None):
         """A strategy page. Splits onto continuation pages when long."""
+        norm = lambda t: re.sub(r"\W+", "", (t or "").lower())
+        paras = [p for p in paras if norm(p.get("text")) not in (norm(title), "")]
         pages, cur, used = [], [], 0.0
         width = 4.9 if image_note else 9.23
         cap = BODY_BOTTOM - BODY_TOP - 0.1 - (0.3 if intro else 0)
+        pt = fit_pt(paras, width, cap, (9, 8))
         for p in paras:
-            h = text_height([p], width, 9)
+            h = text_height([p], width, pt)
             if cur and used + h > cap:
                 pages.append(cur); cur, used = [], 0.0
             cur.append(p); used += h
@@ -229,9 +250,9 @@ class Deck:
                 self._box(s, 0.40, y, 9.23, 0.3, [{"text": intro, "bullet": False}], pt=9); y += 0.32
             if image_note and i == 0:
                 self._placeholder(s, 0.40, y, 4.1, BODY_BOTTOM - y - 0.05, image_note)
-                self._box(s, 4.65, y, 5.0, BODY_BOTTOM - y, pp, pt=9)
+                self._box(s, 4.65, y, 5.0, BODY_BOTTOM - y, pp, pt=pt)
             else:
-                self._box(s, 0.40, y, 9.23, BODY_BOTTOM - y, pp, pt=9)
+                self._box(s, 0.40, y, 9.23, BODY_BOTTOM - y, pp, pt=pt)
         if table:
             self.table_pages(f"{number}.{len(pages)}", f"{title} (continued)", table["header"], table["rows"],
                              table.get("widths"), intro=table.get("intro"))
@@ -262,8 +283,9 @@ class Deck:
     def cashflow(self, number, title, bullets, image_note):
         s = self._slide()
         self._title(s, number, title)
-        self._placeholder(s, 0.40, 0.50, 6.55, 4.66, image_note)
-        self._box(s, 7.05, 0.47, 2.83, 4.83, [{"text": b} for b in bullets], pt=8)
+        bp = [{"text": b} for b in bullets]
+        self._placeholder(s, 0.40, 0.50, 5.70, 4.66, image_note)
+        self._box(s, 6.20, 0.47, 3.68, 4.83, bp, pt=fit_pt(bp, 3.68, 4.83, (8, 7)))
 
     def save(self, path):
         self.prs.save(path)
