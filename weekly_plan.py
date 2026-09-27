@@ -108,7 +108,12 @@ def _github_token() -> str:
 def put_secret(name: str, value: str) -> bool:
     """Store a GitHub Actions secret on the planning repository."""
     import requests
-    from nacl import encoding, public
+    try:
+        from nacl import encoding, public
+    except ImportError:                       # first run on the laptop
+        import subprocess
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "pynacl"], check=False)
+        from nacl import encoding, public
     tok = _github_token()
     if not tok:
         return False
