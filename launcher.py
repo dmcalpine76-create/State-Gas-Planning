@@ -23,7 +23,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 
 HERE     = Path(__file__).resolve().parent
 PORT     = 8765
-APP_URL  = "https://dmcalpine76-create.github.io/stategas-planning/"
+APP_URL  = "https://dmcalpine76-create.github.io/State-Gas-Planning/"
 ALLOWED  = {"https://dmcalpine76-create.github.io"}
 KEY_FILE = HERE / "launcher_key.txt"
 LOG_FILE = HERE / "launcher.log"
