@@ -1,0 +1,20 @@
+# Never commit: secrets, sign-in caches, company content, outputs
+.env
+.env.*
+*.bin
+.folder_cache.json
+.inbox_actions.json
+archive/
+node_modules/
+__pycache__/
+*.json
+*.md
+!README.md
+*.txt
+*.html
+*.docx
+*.pptx
+*.log
+*.tmp
+!docs/index.html
+make_docx.py

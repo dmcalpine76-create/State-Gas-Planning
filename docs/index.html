@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>State Gas Control Room</title>
+<style>
+:root{
+  --paper:#F6F4F3; --surface:#FFFFFF; --ink:#1A1A1A; --muted:#6B6264; --rule:#E3DCDC;
+  --crimson:#A51C30; --crimson-ink:#FFFFFF; --crimson-soft:#F6E4E7;
+  --good:#1E7A3C; --warn:#9A6A12; --bad:#B3261E;
+  --radius:10px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#151314; --surface:#1F1C1D; --ink:#EEE9E9; --muted:#A79C9E; --rule:#352F31;
+    --crimson:#E0566B; --crimson-ink:#1A1A1A; --crimson-soft:#3A1F25;
+    --good:#6FCF8E; --warn:#E3B55C; --bad:#F2877F; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#151314; --surface:#1F1C1D; --ink:#EEE9E9; --muted:#A79C9E; --rule:#352F31;
+  --crimson:#E0566B; --crimson-ink:#1A1A1A; --crimson-soft:#3A1F25;
+  --good:#6FCF8E; --warn:#E3B55C; --bad:#F2877F; color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--paper);color:var(--ink);font:15px/1.5 Aptos,"Segoe UI",system-ui,-apple-system,sans-serif;
+  padding-inline:16px;padding-block:calc(env(safe-area-inset-top,0px) + 20px) calc(env(safe-area-inset-bottom,0px) + 40px)}
+.wrap{max-width:880px;margin:0 auto;display:grid;gap:28px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px;border-bottom:3px solid var(--crimson);padding-bottom:14px}
+.brand{display:grid;gap:2px}
+.brand small{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--crimson);font-weight:700}
+h1{margin:0;font-size:26px;line-height:1.15;font-weight:700;text-wrap:balance}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;padding:4px 10px;border:1px solid var(--rule);border-radius:999px;background:var(--surface);color:var(--muted)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.dot.ok{background:var(--good)} .dot.warn{background:var(--warn)} .dot.bad{background:var(--bad)}
+section{display:grid;gap:10px}
+h2{margin:0;font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.list{background:var(--surface);border:1px solid var(--rule);border-radius:var(--radius);overflow:hidden}
+.row{display:grid;grid-template-columns:1fr auto;gap:10px 16px;align-items:center;padding:16px 18px;border-top:1px solid var(--rule)}
+.row:first-child{border-top:0}
+.row h3{margin:0;font-size:16px;font-weight:700}
+.row p{margin:2px 0 0;color:var(--muted);font-size:13.5px;max-width:62ch}
+.meta{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;margin-top:6px;display:flex;align-items:center;gap:6px}
+.controls{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}
+label.days{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
+input[type=number]{width:64px;padding:7px 8px;border:1px solid var(--rule);border-radius:7px;background:var(--paper);color:var(--ink);font:inherit;font-variant-numeric:tabular-nums}
+input[type=password],input[type=text]{width:100%;padding:9px 10px;border:1px solid var(--rule);border-radius:7px;background:var(--paper);color:var(--ink);font:inherit}
+button,.btn{font:inherit;font-weight:600;font-size:14px;padding:8px 16px;border-radius:7px;border:1px solid var(--crimson);background:var(--crimson);color:var(--crimson-ink);cursor:pointer;text-decoration:none;white-space:nowrap}
+button.ghost,.btn.ghost{background:transparent;color:var(--crimson)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible,.btn:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--crimson);outline-offset:2px}
+.soon h3{color:var(--muted)}
+.tag{font-size:11px;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--rule);border-radius:4px;padding:1px 6px;color:var(--muted);margin-left:6px;vertical-align:2px;font-weight:600}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:var(--radius);padding:4px 18px}
+summary{cursor:pointer;font-weight:700;padding:12px 0}
+.settings{display:grid;gap:18px;padding-bottom:16px}
+.settings p{margin:4px 0 8px;color:var(--muted);font-size:13.5px}
+.pair{display:flex;flex-wrap:wrap;gap:8px}
+#toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 20px);transform:translateX(-50%);max-width:calc(100% - 32px);background:var(--ink);color:var(--paper);padding:10px 16px;border-radius:8px;font-size:14px;box-shadow:0 6px 24px rgba(0,0,0,.2)}
+@media (max-width:560px){.row{grid-template-columns:1fr}.controls{justify-content:flex-start}}
+@media (prefers-reduced-motion:no-preference){button{transition:filter .15s}button:hover:not(:disabled){filter:brightness(1.08)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><small>State Gas · ASX: GAS</small><h1>Control Room</h1></div>
+    <div class="chips">
+      <span class="chip" id="chip-laptop"><span class="dot"></span><span>Laptop: checking</span></span>
+      <span class="chip" id="chip-github"><span class="dot"></span><span>GitHub: checking</span></span>
+    </div>
+  </header>
+
+  <section aria-labelledby="h-auto">
+    <h2 id="h-auto">Runs by itself · re-run if needed</h2>
+    <div class="list">
+      <div class="row">
+        <div><h3>Morning briefing</h3><p>Weekdays at 5:17 and 8:15. Re-run it here if a run failed or you want a fresh one.</p>
+          <div class="meta" id="meta-briefing">Last run: checking</div></div>
+        <div class="controls"><button data-cloud="briefing">Re-run now</button></div>
+      </div>
+      <div class="row">
+        <div><h3>Friday wrap</h3><p>Fridays at 4:30pm: what slipped, next week's shape, deadline radar.</p>
+          <div class="meta" id="meta-wrap">Last run: checking</div></div>
+        <div class="controls"><button data-cloud="wrap">Re-run now</button></div>
+      </div>
+      <div class="row soon">
+        <div><h3>Sunday weekly plan <span class="tag">Phase 2</span></h3><p>Sundays at 5pm: consolidates the week into the knowledge base and plans the next one.</p></div>
+        <div class="controls"><button disabled>Not built yet</button></div>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-laptop">
+    <h2 id="h-laptop">On your laptop · opens a Command Prompt window</h2>
+    <div class="list">
+      <div class="row">
+        <div><h3>Inbox actions</h3><p>Scans your mailbox, extracts actions, opens the review screen to push tasks to To Do and book diary blocks.</p>
+          <div class="meta" id="meta-inbox"></div></div>
+        <div class="controls">
+          <label class="days" for="days-inbox">Days <input type="number" id="days-inbox" min="1" max="120" value="14"></label>
+          <button data-local="inbox" data-days="days-inbox">Run</button>
+          <button class="ghost" data-local="inbox_review">Reopen review</button>
+        </div>
+      </div>
+      <div class="row">
+        <div><h3>Weekly board update</h3><p>Drafts this week's update to directors and saves it as an Outlook draft.</p>
+          <div class="meta" id="meta-board_update"></div></div>
+        <div class="controls">
+          <label class="days" for="days-board_update">Days <input type="number" id="days-board_update" min="1" max="120" value="7"></label>
+          <button data-local="board_update" data-days="days-board_update">Run</button>
+        </div>
+      </div>
+      <div class="row">
+        <div><h3>Monthly board pack</h3><p>Board briefing, Word report draft and the PowerPoint deck, saved in the planning folder.</p>
+          <div class="meta" id="meta-board_briefing"></div></div>
+        <div class="controls">
+          <label class="days" for="days-board_briefing">Days <input type="number" id="days-board_briefing" min="1" max="120" value="30"></label>
+          <button data-local="board_briefing" data-days="days-board_briefing">Run</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <details id="settings">
+    <summary>Settings</summary>
+    <div class="settings">
+      <div>
+        <strong>Laptop launcher</strong>
+        <p>Lets the buttons above start tools on your PC. Install it once by running <em>install_launcher.bat</em> in the state gas planning folder; it pairs itself with this page. To pair again, make sure it is running and press Pair.</p>
+        <div class="pair"><a class="btn" href="http://127.0.0.1:8765/pair">Pair with launcher</a><button class="ghost" id="unpair">Forget pairing</button></div>
+      </div>
+      <div>
+        <label for="gh-token"><strong>GitHub key</strong></label>
+        <p>Needed only for the Re-run buttons. A fine-grained token limited to your repositories with Actions: read and write. It is kept in this browser only.</p>
+        <input type="password" id="gh-token" autocomplete="off" placeholder="github_pat_…">
+        <div class="pair" style="margin-top:8px"><button id="save-token">Save key</button><button class="ghost" id="clear-token">Remove key</button></div>
+      </div>
+    </div>
+  </details>
+</div>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+
+<script>
+(() => {
+  const OWNER = "dmcalpine76-create";
+  const CLOUD = {
+    briefing: { repo: "morning-briefing", wf: "generate.yml", inputs: { reason: "Control Room re-run" }, meta: "meta-briefing" },
+    wrap:     { repo: "morning-briefing", wf: "friday_wrap.yml", inputs: null, meta: "meta-wrap" },
+  };
+  const LAUNCHER = "http://127.0.0.1:8765";
+  const store = {
+    get(k){ try { return localStorage.getItem(k) || ""; } catch { return ""; } },
+    set(k,v){ try { v ? localStorage.setItem(k,v) : localStorage.removeItem(k); } catch {} },
+  };
+  const $ = id => document.getElementById(id);
+  let toastTimer;
+  const toast = msg => { const t=$("toast"); t.textContent=msg; t.hidden=false; clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.hidden=true,5000); };
+  const chip = (id, state, text) => { const c=$(id); c.querySelector(".dot").className="dot "+state; c.lastElementChild.textContent=text; };
+  const when = iso => new Date(iso).toLocaleString("en-AU",{weekday:"short",day:"numeric",month:"short",hour:"numeric",minute:"2-digit"});
+
+  // Pairing arrives from the launcher as #pair=<key>; keep it, then clean the address bar.
+  if (location.hash.startsWith("#pair=")) {
+    store.set("launcherKey", location.hash.slice(6));
+    history.replaceState(null, "", location.pathname);
+    setTimeout(() => toast("Paired with the launcher on this PC."), 300);
+  }
+
+  async function checkLaptop(){
+    try {
+      const r = await fetch(LAUNCHER + "/status", { cache: "no-store" });
+      if (!r.ok) throw 0;
+      if (store.get("launcherKey")) chip("chip-laptop","ok","Laptop: ready");
+      else chip("chip-laptop","warn","Laptop: not paired (Settings)");
+      return true;
+    } catch {
+      chip("chip-laptop","bad","Laptop: launcher not running");
+      return false;
+    }
+  }
+
+  async function gh(path, opts={}){
+    const token = store.get("ghToken");
+    const headers = { "Accept":"application/vnd.github+json", ...(opts.headers||{}) };
+    if (token) headers.Authorization = "Bearer " + token;
+    return fetch("https://api.github.com" + path, { ...opts, headers });
+  }
+
+  async function lastRuns(){
+    let anyOk = false;
+    for (const [key, c] of Object.entries(CLOUD)) {
+      const m = $(c.meta);
+      try {
+        const r = await gh(`/repos/${OWNER}/${c.repo}/actions/workflows/${c.wf}/runs?per_page=1`);
+        if (!r.ok) throw r.status;
+        anyOk = true;
+        const run = (await r.json()).workflow_runs?.[0];
+        if (!run) { m.textContent = "No runs yet"; continue; }
+        const state = run.status !== "completed" ? ["warn","Running now"] :
+                      run.conclusion === "success" ? ["ok","Succeeded"] : ["bad","Failed"];
+        m.innerHTML = "";
+        const d = document.createElement("span"); d.className = "dot " + state[0];
+        const a = document.createElement("a"); a.href = run.html_url; a.target = "_blank"; a.rel = "noopener";
+        a.textContent = `${state[1]} · ${when(run.run_started_at || run.created_at)}`;
+        a.style.color = "inherit";
+        m.append(d, a);
+      } catch (e) {
+        m.textContent = "Last run: unavailable";
+      }
+    }
+    const hasToken = !!store.get("ghToken");
+    chip("chip-github", anyOk ? (hasToken ? "ok" : "warn") : "bad",
+         anyOk ? (hasToken ? "GitHub: ready" : "GitHub: add key to re-run") : "GitHub: unreachable");
+  }
+
+  async function runCloud(key, btn){
+    const c = CLOUD[key];
+    if (!store.get("ghToken")) { $("settings").open = true; $("gh-token").focus(); toast("Add your GitHub key in Settings first."); return; }
+    btn.disabled = true;
+    try {
+      const body = { ref: "main" }; if (c.inputs) body.inputs = c.inputs;
+      const r = await gh(`/repos/${OWNER}/${c.repo}/actions/workflows/${c.wf}/dispatches`,
+                         { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
+      if (r.status === 204) { toast("Started. It usually takes a few minutes."); setTimeout(lastRuns, 6000); }
+      else if (r.status === 401) toast("GitHub rejected the key. It may have expired: make a new one and save it in Settings.");
+      else if (r.status === 403 || r.status === 404) toast("This key can't start that run. Give it Actions: read and write on " + c.repo + ".");
+      else toast("GitHub said no (" + r.status + "). Try again in a minute.");
+    } catch { toast("Couldn't reach GitHub. Check your connection."); }
+    finally { btn.disabled = false; }
+  }
+
+  async function runLocal(tool, daysId, btn){
+    const key = store.get("launcherKey");
+    if (!key) { $("settings").open = true; toast("Pair with the launcher first (Settings)."); return; }
+    const days = daysId ? Number($(daysId).value) : null;
+    if (daysId && !(Number.isInteger(days) && days >= 1 && days <= 120)) { toast("Days must be a whole number from 1 to 120."); $(daysId).focus(); return; }
+    btn.disabled = true;
+    try {
+      const r = await fetch(LAUNCHER + "/run", { method:"POST", headers:{ "Content-Type":"application/json" },
+                            body: JSON.stringify({ tool, days, key }) });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) {
+        const meta = $("meta-" + tool.replace("_review",""));
+        const stamp = when(new Date().toISOString());
+        if (meta) meta.textContent = `Started ${stamp}${days ? ` · ${days} days` : ""}`;
+        store.set("started-" + tool, stamp + (days ? ` · ${days} days` : ""));
+        toast("Started on your laptop. Follow it in the Command Prompt window.");
+      } else toast(j.error ? cap(j.error) + "." : "The launcher refused the request.");
+    } catch {
+      chip("chip-laptop","bad","Laptop: launcher not running");
+      toast("Your laptop isn't answering. Is it on, with the launcher running? Run install_launcher.bat once to fix.");
+    } finally { btn.disabled = false; }
+  }
+  const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+
+  document.addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.cloud) runCloud(b.dataset.cloud, b);
+    if (b.dataset.local) runLocal(b.dataset.local, b.dataset.days, b);
+  });
+  $("save-token").onclick = () => { const v=$("gh-token").value.trim(); if(!v){toast("Paste the key first.");return;} store.set("ghToken", v); $("gh-token").value=""; toast("GitHub key saved in this browser."); lastRuns(); };
+  $("clear-token").onclick = () => { store.set("ghToken",""); toast("GitHub key removed."); lastRuns(); };
+  $("unpair").onclick = () => { store.set("launcherKey",""); toast("Pairing forgotten."); checkLaptop(); };
+
+  for (const t of ["inbox","board_update","board_briefing"]) { const s=store.get("started-"+t); if (s) $("meta-"+t).textContent = "Last started " + s; }
+  for (const id of ["days-inbox","days-board_update","days-board_briefing"]) {
+    const v = store.get(id); if (v) $(id).value = v;
+    $(id).addEventListener("change", () => store.set(id, $(id).value));
+  }
+  checkLaptop(); lastRuns();
+  setInterval(checkLaptop, 30000);
+})();
+</script>
+</body>
+</html>
