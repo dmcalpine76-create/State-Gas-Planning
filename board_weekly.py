@@ -87,17 +87,33 @@ def fetch_sent_updates(token: str, store: Path, days: int = 180) -> list:
         subj = (m.get("subject") or "")
         if subj.lower().startswith(("re:", "fw:", "fwd:")):
             continue
+        raw = (m.get("body") or {}).get("content", "")
+        if "teams.microsoft.com/meet" in raw or "Microsoft Teams meeting" in raw:
+            continue                                # meeting invites
+        text = _clean(raw)
         rc = recips(m)
-        if "board update" in subj.lower() or (directors and len(rc & directors) >= 2
-                                              and len(rc & directors) >= 0.6 * len(rc)):
-            text = (m.get("body") or {}).get("content", "")
-            out.append({"date": m["sentDateTime"][:10], "subject": subj, "text": text[:12000]})
+        titled = "board update" in subj.lower()
+        to_board = directors and len(rc & directors) >= 2 and len(rc & directors) >= 0.6 * len(rc)
+        if titled or (to_board and len(text) >= 400):
+            out.append({"date": m["sentDateTime"][:10], "subject": subj,
+                        "kind": "update" if titled else "note", "text": text[:12000]})
     for u in out[:12]:                              # keep a readable history
         f = store / "board" / "sent" / f"{u['date']}.txt"
         if not f.exists():
             f.parent.mkdir(parents=True, exist_ok=True)
             f.write_text(f"{u['subject']}\n\n{u['text']}", encoding="utf-8")
     return out
+
+
+def _clean(text: str) -> str:
+    """Drop the signature block and any quoted thread below it."""
+    import re
+    text = text.replace("\r", "")
+    for marker in ("\nKind regards", "\nRegards", "\nFrom: ", "\n________________"):
+        i = text.find(marker)
+        if i > 200:
+            text = text[:i]
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 # ── learning from your edits ────────────────────────────────────────────────
@@ -113,7 +129,7 @@ def learn_from_edits(client, store: Path, sent: list) -> int:
         if d in done:
             continue
         draft = _read(dfile, {})
-        after = [u for u in sent if d <= u["date"] <= (datetime.date.fromisoformat(d)
+        after = [u for u in sent if u.get("kind") == "update" and d <= u["date"] <= (datetime.date.fromisoformat(d)
                                                         + datetime.timedelta(days=10)).isoformat()]
         if not after:
             if (_today() - datetime.date.fromisoformat(d)).days > 10:
@@ -165,7 +181,9 @@ def generate(client, store: Path, emails: list, days: int, sent: list, voice_rul
     deadlines = [d for d in _read(store / "deadlines.json", {"deadlines": []}).get("deadlines", [])
                  if today.isoformat() <= (d.get("date") or "") <= horizon]
     lessons = [x["lesson"] for x in _read(store / "board" / "lessons.json", {"lessons": []})["lessons"]]
-    last = sent[:2]
+    updates = [u for u in sent if u.get("kind") == "update"]
+    style = updates[0]["text"][:7000] if updates else ""
+    told = sent[:6]                                 # every recent note to the directors
 
     prompt = f"""You are drafting the weekly board update email that the Managing Director sends
 to his directors. Today is {today:%A %d %B %Y}; the update covers {since} to today.
@@ -179,9 +197,13 @@ LESSONS FROM HOW HE EDITED EARLIER DRAFTS (follow these closely):
 
 STANDING INSTRUCTIONS: {instructions[:3000] or "(none)"}
 
-WHAT HE TOLD THE BOARD MOST RECENTLY (do not repeat unchanged news; report the change
-since then, and follow up any next step he promised):
-{json.dumps(last, ensure_ascii=False)[:14000] if last else "(no previous update found)"}
+AN UPDATE HE ACTUALLY SENT - match its length, tone, sentence style and level of detail:
+{style or "(none found)"}
+
+EVERYTHING HE HAS TOLD THE DIRECTORS RECENTLY, newest first (weekly updates and ad hoc notes).
+Do not repeat news they already have; report what has changed since, and follow up any
+next step he promised:
+{json.dumps([{k: u[k] for k in ("date", "subject", "text")} for u in told], ensure_ascii=False)[:16000] if told else "(none found)"}
 
 MATTERS THAT MOVED THIS PERIOD (company knowledge):
 {json.dumps(moved, ensure_ascii=False)[:20000]}
@@ -194,8 +216,14 @@ DATED OBLIGATIONS IN THE NEXT 30 DAYS: {json.dumps(deadlines, ensure_ascii=False
 THIS PERIOD'S EMAIL (evidence):
 {build_email_context(emails, days)[:80000]}
 
+LENGTH AND FILTER: usually 5 to 8 matters, never more than 10. 2-4 sentences each.
+Leave out operational detail the board does not need (supplier quotes, invoices, payroll,
+staff leave, scheduling). Never criticise or comment on individuals by name. No emotive
+remarks. Lead with what the board most needs to know this week.
+
 Write the update. Respond with JSON only:
-{{"items":[{{"matter":"short heading","update":"2-4 sentences, first person, judgment, ends with next step and timing",
+{{"intro":"optional short clause to follow 'A quick update on key matters for the period', e.g. 'noting I have been largely focused on the audit' - or empty",
+ "items":[{{"matter":"short heading","update":"2-4 sentences, first person, judgment, ends with next step and timing",
    "follows_up":"what he said last time that this updates, or empty","sources":["email subject or matter name"]}}],
  "omitted":[{{"matter":"","why":"why it is not board-level this week"}}]}}
 Items in priority order, most important first."""
@@ -204,12 +232,13 @@ Items in priority order, most important first."""
     return out
 
 
-def render_email(items: list, md_name: str, md_title: str) -> tuple:
+def render_email(items: list, md_name: str, md_title: str, intro: str = "") -> tuple:
     """Plain, personal email: Aptos 11pt, numbered bold underlined headings."""
     s = "font-family:Aptos,'Aptos (Body)',Calibri,Arial,sans-serif;font-size:11pt;color:#1a1a1a;line-height:1.5;"
     e = html.escape
-    parts = [f'<div style="{s}"><p style="{s}">Dear Directors</p>']
-    text = ["Dear Directors", ""]
+    lead = "A quick update on key matters for the period" + (f", {intro.strip().rstrip('.:')}" if intro else "") + ":"
+    parts = [f'<div style="{s}"><p style="{s}">Dear Directors</p><p style="{s}">{e(lead)}</p>']
+    text = ["Dear Directors", "", lead, ""]
     for i, it in enumerate(items, 1):
         parts.append(f'<p style="{s}margin:16px 0 4px 0;"><b><u>{i}. {e(it.get("matter",""))}</u></b></p>'
                      f'<p style="{s}margin:0;">{e(it.get("update",""))}</p>')
@@ -251,14 +280,15 @@ def make_update(token, client, store: Path, emails: list, days: int, voice_rules
     sent = fetch_sent_updates(token, store)
     learned = learn_from_edits(client, store, sent)
     out = generate(client, store, emails, days, sent, voice_rules, instructions)
-    html_body, text = render_email(out["items"], md_name, md_title)
+    html_body, text = render_email(out["items"], md_name, md_title, out.get("intro", ""))
     stamp = _today().isoformat()
     _write(store / "board" / "drafts" / f"{stamp}.json",
            {"date": stamp, "days": days, "items": out["items"], "omitted": out.get("omitted", []),
             "text": text})
     (store / "board" / "drafts" / f"{stamp}.html").write_text(render_review(out, days), encoding="utf-8")
     directors = _read(store / "board" / "directors.json", {"emails": []}).get("emails", [])
-    subject = f"{company} — Board Update {_today():%d %B %Y}"
+    friday = _today() - datetime.timedelta(days=(_today().weekday() - 4) % 7)
+    subject = f"{company} — Board Update Week Ended {friday.day} {friday:%B %Y}"
     create_draft(token, subject, html_body, [])   # you address and send it yourself
     say(f"Board update: {len(out['items'])} matters drafted, {len(out.get('omitted', []))} left out, "
         f"{len(sent)} past updates read, {learned} new lessons from your edits")

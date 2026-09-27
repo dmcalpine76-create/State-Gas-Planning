@@ -41,7 +41,7 @@ def cmd_run(args, preview=False):
     if preview:
         sent = bw.fetch_sent_updates(token, store)
         out = bw.generate(client, store, emails, days, sent, VOICE_RULES, instructions)
-        print(bw.render_email(out["items"], MD_NAME, MD_TITLE)[1])
+        print(bw.render_email(out["items"], MD_NAME, MD_TITLE, out.get("intro", ""))[1])
         return
     res = bw.make_update(token, client, store, emails, days, VOICE_RULES, COMPANY_NAME,
                          MD_NAME, MD_TITLE, instructions, say=lambda m: print("  " + m))
