@@ -18,3 +18,4 @@ __pycache__/
 *.tmp
 !docs/index.html
 make_docx.py
+!index.html
