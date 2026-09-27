@@ -7,6 +7,7 @@ drop the old slides, and draw each page with his measurements and type:
 Georgia Pro Light, 14pt bold titles with a short crimson rule, 8-9pt body.
 Long pages and tables continue onto "N.1 (continued)" pages, as he does.
 """
+import re
 import copy
 import math
 from pptx import Presentation
@@ -93,6 +94,7 @@ class Deck:
         pPr.append(bu)
 
     def _title(self, s, number, title):
+        title = re.sub(r"^\s*(\d+(\.\d+)*)\.?\s+", "", title or "").strip()
         label = f"{number}." if number and "." not in str(number) else str(number or "")
         self._box(s, 0.40, 0.08, 8.2, 0.26, [{"text": f"{label}\t{title}" if label else title, "bullet": False}],
                   pt=14, bold=True)
