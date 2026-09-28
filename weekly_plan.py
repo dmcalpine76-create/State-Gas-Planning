@@ -39,7 +39,8 @@ CLOUD      = os.environ.get("CI") == "true"
 # One Microsoft sign-in for every process (morning briefing, Friday wrap,
 # Sunday plan, board tools, inbox_actions): the union of what each needs.
 SCOPES     = ["Mail.ReadWrite", "Mail.Read", "Mail.Send", "Calendars.ReadWrite",
-              "Calendars.Read", "Tasks.ReadWrite", "Files.ReadWrite", "User.Read"]
+              "Calendars.Read", "Tasks.ReadWrite", "Files.ReadWrite", "Sites.Read.All",
+              "User.Read"]
 MB_REPO    = "dmcalpine76-create/morning-briefing"
 CACHE_FILE = HERE / ".weekly_token_cache.bin"
 TASK_LIST  = "Daily Priorities"
@@ -90,8 +91,13 @@ def get_token() -> str:
     app = _msal_app(cache)
     accounts = app.get_accounts()
     result = app.acquire_token_silent(SCOPES, account=accounts[0]) if accounts else None
+    if accounts and (not result or "access_token" not in result):
+        # An older sign-in without the newer SharePoint permission still runs
+        # everything else; only the board meeting folders are unavailable.
+        result = app.acquire_token_silent([x for x in SCOPES if x != "Sites.Read.All"],
+                                          account=accounts[0])
     if not result or "access_token" not in result:
-        raise SystemExit("Sign-in needed: on the laptop, press 'Sign in for the Sunday run' "
+        raise SystemExit("Sign-in needed: on the laptop, press 'Microsoft sign-in (all processes)' "
                          "in the Control Room (or run: py weekly_plan.py setup).")
     if cache.has_state_changed:
         CACHE_FILE.write_text(cache.serialize(), encoding="utf-8")
@@ -614,6 +620,11 @@ def cmd_run(args):
                 remote.pull(f"board/style/style_guide_before_{args.meeting}.md")
             remote.pull("board/pack_lessons.json")
             remote.pull("board/pack_guidance.md")
+            remote.pull("board/sources.json")
+            remote.pull("board/notes_for_next_meeting.md")
+            for n in remote.list("board/packs/drafts"):
+                if n.endswith("spec.json"):
+                    remote.pull(f"board/packs/drafts/{n}")
             for n in remote.list("board/sent"):
                 remote.pull(f"board/sent/{n}")
             decks = sorted(n for n in remote.list("board/packs")
@@ -789,6 +800,14 @@ def run_pack(args, token, store, remote, today):
         for key in ("pptx", "docx", "spec"):
             rel = out[key].relative_to(store).as_posix()
             remote.push(rel, force_new=True)
+        for rel in ("board/pack_lessons.json", "board/notes_for_next_meeting.md"):
+            remote.push(rel, force_new=rel not in remote.hashes)
+        for sub in ("board/packs", "board/notes_archive"):
+            d = store / sub
+            for fp in (d.glob("*") if d.exists() else []):
+                rel = f"{sub}/{fp.name}"
+                if fp.is_file() and rel not in remote.hashes:
+                    remote.push(rel, force_new=True)
         say("Saved to the knowledge folder: board/packs/drafts")
     say("Done (board pack)")
 

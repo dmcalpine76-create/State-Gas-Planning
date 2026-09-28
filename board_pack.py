@@ -123,6 +123,19 @@ STANDING INSTRUCTIONS: {ctx["instructions"] or "(none)"}
 HIS STANDING GUIDANCE FOR THE PACK: {ctx.get("guidance") or "(none)"}
 
 EVIDENCE SINCE THE LAST BOARD REPORT ({ctx["since"]}), in priority order:
+A. HIS OWN NOTES FOR THIS MEETING (calls, meetings, his current thinking - treat as authoritative
+   and give it prominence; these are often the strategic points email does not show):
+{ctx.get("notes") or "(none)"}
+
+B. MINUTES OF THE LAST BOARD MEETING ({ctx.get("minutes_ref") or "not found"}) - what the board decided,
+   asked for and actioned. Every decision and board request must be reflected (e.g. a forecast
+   case the board adopted, advice the board asked for) and every action item reported back on:
+{ctx.get("minutes") or "(not available)"}
+
+C. MARKET AND POLICY CONTEXT FOR THE PERIOD (use for the headlines' external framing and the
+   strategic papers where it changes the picture; do not overstate):
+{ctx.get("market") or "(not available)"}
+
 1. What he has told the directors since (weekly updates and notes):
 {json.dumps(ctx["sent"], ensure_ascii=False)[:40000] or "(none found)"}
 
@@ -171,7 +184,8 @@ STRATEGY PAGES HE HAS WRITTEN IN RECENT REPORTS: {json.dumps(strat_titles, ensur
 
 TASK: plan this month's report and write the Executive Summary and cashflow commentary.
 - headlines: 4-5 bullets, each one sentence of at most 30 words - the month's most important
-  strategic points, as in his summaries.
+  strategic points, as in his summaries. Open with the external environment (policy, market,
+  value markers) when something material moved, then the month's key progress.
 - boxes: START from the workstream boxes in last month's Executive Summary ({json.dumps(prior_boxes, ensure_ascii=False)})
   and keep their titles unless a workstream is clearly finished or superseded. Add a box only
   when a new matter has become one of the few things the board must hold in mind. Usually 4
@@ -187,7 +201,8 @@ TASK: plan this month's report and write the Executive Summary and cashflow comm
   style, its purpose (what the board needs from it), the format (narrative, or narrative plus
   table, or table), and image_note if a map, chart or model extract belongs on it.
 - cashflow: title and 5-9 commentary bullets rolled forward from last month's, changing only
-  what the evidence supports. Where a number must come from the model, write it as [confirm].
+  what the evidence supports. Reflect any forecast decisions or changes the board asked for at
+  the last meeting (see the minutes) - e.g. which case is now the base case. Where a number must come from the model, write it as [confirm].
 - flags: private notes to the MD - risks, contradictions, things the board may ask.
 
 Respond with JSON only:
@@ -231,7 +246,9 @@ MATTERS ALREADY COVERED ON THEIR OWN PAGES THIS MONTH (leave these out): {json.d
 TASK: write this month's Other matters table. Carry forward EVERY row from last month's table
 (same Area and Matter wording), updating it - if nothing has moved say so briefly. Drop a row
 only if it is clearly closed or now has its own page, and list any dropped row in "dropped"; add board-relevant matters from
-the evidence that have no page of their own. Usually 5 to 10 rows. Update is 2-3 sentences (under
+the evidence that have no page of their own - including a row reporting back on each action item
+from the last meeting's minutes that has no page of its own, with Action "Discuss" or "Decision"
+where the board asked to consider it. Usually 5 to 10 rows. Update is 2-3 sentences (under
 60 words) of substance and view in his voice; Next Steps under 30 words; Next Steps concrete; Risk Nil/Low/Med/High; Action Nil,
 Note, Discuss or Decision.
 
@@ -293,6 +310,97 @@ Respond with the edited JSON only."""
     return out if isinstance(out, dict) and out else content
 
 
+def _meeting_iso(text: str):
+    try:
+        return datetime.datetime.strptime(text.strip(), "%d %B %Y").date().isoformat()
+    except Exception:
+        return None
+
+
+def learn_from_finals(token, client, store: Path, model=None) -> int:
+    """
+    For each earlier draft whose meeting has now happened, find the final deck
+    the MD presented (knowledge store board/packs, else the SharePoint meeting
+    folder), save its text as the new roll-forward point, and record what he
+    changed as lessons for future drafts (board/pack_lessons.json).
+    """
+    import tempfile
+    import board_sources as bs
+    lf = store / "board" / "pack_lessons.json"
+    book = _read(lf, {"lessons": []})
+    book.setdefault("learned", [])
+    drafts = sorted((store / "board" / "packs" / "drafts").glob("*spec.json"))
+    done = 0
+    for sp in drafts:
+        if sp.name in book["learned"]:
+            continue
+        spec = _read(sp, {})
+        miso = _meeting_iso(spec.get("meeting_date", ""))
+        if not miso or miso >= datetime.date.today().isoformat():
+            continue
+        final = None
+        for f in _deck_files(store):
+            if _date_of(f) == miso:
+                final = _load_deck(f)
+        if final is None:
+            for d in bs.final_decks(token, store, miso):
+                with tempfile.NamedTemporaryFile(suffix=".pptx", delete=False) as t:
+                    t.write(d["fetch"]())
+                slides = read_deck(t.name)
+                first = deck_as_text(slides[:1], 2000)
+                if spec.get("meeting_date", "~").lower() in first.lower():
+                    final = slides
+                    out = store / "board" / "packs" / f"{miso} Board Report.deck.json"
+                    out.write_text(json.dumps(slides, ensure_ascii=False), encoding="utf-8")
+                    break
+        if final is None:
+            continue
+        slim = {k: spec.get(k) for k in ("exec", "strategy_pages", "cashflow", "other_matters")}
+        prompt = f"""Below is a machine draft of a monthly board report and the final version the
+Managing Director actually presented. Work out what he changed and why, as reusable lessons for
+future drafts: what he chose to cover or leave out, how he framed the month, which papers he
+wrote, what level of detail and tone he used, what evidence he drew on that the draft lacked.
+Lessons must be general rules, not this month's facts. Then merge them with the existing lessons
+into one list of at most 25, most important first, removing duplicates.
+
+EXISTING LESSONS: {json.dumps([x["lesson"] for x in book["lessons"]], ensure_ascii=False)}
+
+DRAFT (JSON): {json.dumps(slim, ensure_ascii=False)[:30000]}
+
+FINAL AS PRESENTED:
+{deck_as_text(final, 30000)}
+
+Respond with JSON only: {{"lessons": [""], "new_this_time": [""]}}"""
+        res = _call(client, prompt, 4000, "learn from final deck", model)
+        if res.get("lessons"):
+            book["lessons"] = [{"lesson": l, "updated": datetime.date.today().isoformat()}
+                               for l in res["lessons"][:25]]
+        book["learned"].append(sp.name)
+        book.setdefault("log", []).append({"draft": sp.name, "meeting": miso,
+                                           "new": res.get("new_this_time", [])})
+        if not spec.get("_evidence", {}).get("backtest"):
+            notes = store / "board" / "notes_for_next_meeting.md"
+            if notes.exists() and bs.running_notes(store):
+                arch = store / "board" / "notes_archive" / f"{miso}.md"
+                arch.parent.mkdir(parents=True, exist_ok=True)
+                arch.write_text(notes.read_text(encoding="utf-8"), encoding="utf-8")
+                notes.write_text(NOTES_TEMPLATE, encoding="utf-8")
+        done += 1
+    if done:
+        lf.parent.mkdir(parents=True, exist_ok=True)
+        lf.write_text(json.dumps(book, indent=1, ensure_ascii=False), encoding="utf-8")
+    return done
+
+
+NOTES_TEMPLATE = """# Notes for the next board meeting
+
+> Jot anything the board pack should know that isn't in email: calls, meetings, what you're
+> thinking, what you want the board to discuss. One line each is fine. The board pack treats
+> these as top priority. After the meeting they are archived and this page resets.
+
+"""
+
+
 def next_meeting(events, today):
     for e in events:
         if "board" in e["subject"].lower() and "meeting" in e["subject"].lower() and e["start"][:10] >= today.isoformat():
@@ -310,6 +418,9 @@ def write_bridge(path, spec, parts, ctx):
     doc.add_paragraph(f"Rolled forward from: {ctx['prior_file']}. Evidence since {ctx['since']}: "
                       f"{len(ctx['sent'])} notes to directors, {len(ctx['matters'])} active matters. "
                       f"Style guide: {ctx.get('guide_file','')}. "
+                      f"Minutes used: {ctx.get('minutes_ref') or 'none found'}. "
+                      f"Market context: {'yes' if ctx.get('market') else 'none'}. "
+                      f"Your notes: {'yes' if ctx.get('notes') else 'none'}. "
                       "Draft for the MD's review - not for circulation.")
     if parts["plan"].get("flags"):
         doc.add_heading("Flags for you", 1)
@@ -353,7 +464,24 @@ def make_pack(token, client, store: Path, emails: list, events: list, say=print,
     today = datetime.date.today()
     md = datetime.date.fromisoformat(meeting) if meeting else (next_meeting(events, today) or today)
     backtest = md < today
+    try:
+        learned = learn_from_finals(token, client, store, model)
+        if learned:
+            say(f"Learned from {learned} final deck(s)")
+    except Exception as ex:
+        say(f"!! Could not learn from final decks ({type(ex).__name__})")
     ctx = gather(store, prior_name, md.isoformat() if backtest else None)
+    import board_sources as bs
+    until = md.isoformat() if backtest else today.isoformat()
+    try:
+        mins = bs.last_minutes(token, store, until)
+        ctx["minutes"], ctx["minutes_ref"] = mins.get("text", ""), (
+            f"{mins['folder']}/{mins['name']}, saved {mins['saved']}" if mins else "")
+    except Exception as ex:
+        ctx["minutes"], ctx["minutes_ref"] = "", ""
+        say(f"!! Could not read the last minutes ({type(ex).__name__})")
+    ctx["market"] = bs.market_context(client, ctx["since"], until, model)
+    ctx["notes"] = "" if backtest else bs.running_notes(store)
     if backtest:   # re-drafting a past meeting: only what was known before it
         cut = md.isoformat()
         emails = [m for m in emails
@@ -412,6 +540,8 @@ def make_pack(token, client, store: Path, emails: list, events: list, say=print,
     pptx_path = out_dir / f"{stamp} Board Report DRAFT.pptx"
     pack_render.build(spec, str(template), str(pptx_path))
     docx_path = out_dir / f"{stamp} Board Report DRAFT - notes.docx"
+    spec["_evidence"] = {"minutes": ctx.get("minutes_ref", ""), "market": bool(ctx.get("market")),
+                         "notes": bool(ctx.get("notes")), "backtest": backtest}
     write_bridge(str(docx_path), spec, {"plan": plan, "op": op, "dropped": om.get("dropped", [])}, ctx)
     (out_dir / f"{stamp} spec.json").write_text(json.dumps(spec, indent=1, ensure_ascii=False), encoding="utf-8")
     say(f"Board pack drafted: {len(spec['exec']['boxes'])} summary boxes, "
