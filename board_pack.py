@@ -60,7 +60,8 @@ def _strategy_slides(slides):
     return [s for s in slides[1:] if s["title"] and not any(k in s["title"].lower() for k in skip)]
 
 
-def gather(store: Path, prior_name: str = None):
+def gather(store: Path, prior_name: str = None, cutoff: str = None):
+    """cutoff (ISO date) = back-test: only what was known before that date."""
     files = _deck_files(store)
     if prior_name:
         files = [f for f in files if f.name <= prior_name or f.name.startswith(prior_name)]
@@ -77,18 +78,34 @@ def gather(store: Path, prior_name: str = None):
             if "teams.microsoft.com" not in t and len(t) > 300:
                 sent.append({"date": f.stem, "text": t[:9000]})
     matters = _read(store / "matters.json", {"matters": {}}).get("matters", {})
-    active = {n: {k: m.get(k) for k in ("category", "description", "next_step", "next_step_due", "last_active")}
-              for n, m in matters.items() if m.get("status", "active") == "active"}
+    keys = ("category", "description", "next_step", "next_step_due", "last_active")
+    if cutoff:
+        # A matter last touched after the cutoff has had its notes rewritten
+        # with later knowledge, so it is left out rather than leak the future.
+        lo = (datetime.date.fromisoformat(cutoff) - datetime.timedelta(days=90)).isoformat()
+        chosen = [(n, m) for n, m in matters.items()
+                  if lo <= (m.get("last_active") or "") < cutoff and m.get("status") != "closed"]
+    else:
+        chosen = [(n, m) for n, m in matters.items() if m.get("status", "active") == "active"]
+    chosen.sort(key=lambda x: x[1].get("last_active") or "", reverse=True)
+    active = {n: {k: m.get(k) for k in keys} for n, m in chosen}
+    ref = cutoff or datetime.date.today().isoformat()
     deadlines = [d for d in _read(store / "deadlines.json", {"deadlines": []}).get("deadlines", [])
-                 if (d.get("date") or "") >= datetime.date.today().isoformat()][:30]
-    guide_p = store / "board" / "style" / "style_guide.md"
+                 if (d.get("date") or "") >= ref and (not cutoff or (d.get("added") or "9999") < cutoff)][:30]
+    style = store / "board" / "style"
+    guide_p = style / f"style_guide_before_{cutoff}.md" if cutoff else style / "style_guide.md"
+    if cutoff and not guide_p.exists():
+        guide_p = style / "style_guide.md"
+    guidance_p = store / "board" / "pack_guidance.md"
     lessons = [x["lesson"] for x in _read(store / "board" / "pack_lessons.json", {"lessons": []})["lessons"]]
     instr_p = store / "instructions.md"
     return {
         "prior_file": prior_f.name, "prior": prior, "prior_text": deck_as_text(prior, 30000),
         "history": history, "since": since, "sent": sent, "matters": active, "deadlines": deadlines,
         "guide": guide_p.read_text(encoding="utf-8") if guide_p.exists() else "",
-        "lessons": lessons,
+        "lessons": [] if cutoff else lessons,
+        "guidance": "" if cutoff or not guidance_p.exists() else guidance_p.read_text(encoding="utf-8")[:3000],
+        "guide_file": guide_p.name,
         "instructions": instr_p.read_text(encoding="utf-8")[:3000] if instr_p.exists() else "",
     }
 
@@ -102,6 +119,7 @@ You write exactly as he does. His style guide:
 
 LESSONS FROM HOW HE CHANGED EARLIER DRAFTS: {json.dumps(ctx["lessons"], ensure_ascii=False) if ctx["lessons"] else "(none yet)"}
 STANDING INSTRUCTIONS: {ctx["instructions"] or "(none)"}
+HIS STANDING GUIDANCE FOR THE PACK: {ctx.get("guidance") or "(none)"}
 
 EVIDENCE SINCE THE LAST BOARD REPORT ({ctx["since"]}), in priority order:
 1. What he has told the directors since (weekly updates and notes):
@@ -160,9 +178,8 @@ TASK: plan this month's report and write the Executive Summary and cashflow comm
 - strategy_pages: the matters that need their own page this month because the board must
   understand, discuss or decide something. Last month's strategy pages were
   {json.dumps(prior_pages, ensure_ascii=False)} - carry each forward unless it is clearly resolved.
-  Where capital raising, funding or corporate strategy is live, include a Capital Management /
-  Strategy page - it is usually his lead paper. Add new pages only where the evidence demands.
-  Titles without numbers, under 55 characters. Put the lead paper (usually capital) first.
+  Add new pages only where the evidence demands. Titles without numbers, under 55 characters.
+  Put first the paper the board most needs to discuss or decide at this meeting.
 - Any matter important enough for its own strategy page and still live should normally also
   have an Executive Summary box; a box whose matter is resolved should be dropped or folded
   into a headline. For each give a title in his
@@ -291,6 +308,7 @@ def write_bridge(path, spec, parts, ctx):
     doc.add_heading(f"Board Report draft – {spec['meeting_date']}", 0)
     doc.add_paragraph(f"Rolled forward from: {ctx['prior_file']}. Evidence since {ctx['since']}: "
                       f"{len(ctx['sent'])} notes to directors, {len(ctx['matters'])} active matters. "
+                      f"Style guide: {ctx.get('guide_file','')}. "
                       "Draft for the MD's review - not for circulation.")
     if parts["plan"].get("flags"):
         doc.add_heading("Flags for you", 1)
@@ -332,9 +350,10 @@ def make_pack(token, client, store: Path, emails: list, events: list, say=print,
     from core.graph import build_email_context
     store = Path(store)
     today = datetime.date.today()
-    ctx = gather(store, prior_name)
     md = datetime.date.fromisoformat(meeting) if meeting else (next_meeting(events, today) or today)
-    if md < today:   # re-drafting a past meeting: only what was known before it
+    backtest = md < today
+    ctx = gather(store, prior_name, md.isoformat() if backtest else None)
+    if backtest:   # re-drafting a past meeting: only what was known before it
         cut = md.isoformat()
         emails = [m for m in emails if (m.get("receivedDateTime") or m.get("sentDateTime") or "")[:10] < cut]
         ctx["sent"] = [x for x in ctx["sent"] if x["date"] < cut]
@@ -386,7 +405,7 @@ def make_pack(token, client, store: Path, emails: list, events: list, say=print,
 
     out_dir = store / "board" / "packs" / "drafts"
     out_dir.mkdir(parents=True, exist_ok=True)
-    stamp = today.isoformat()
+    stamp = f"{md.isoformat()} BACKTEST" if backtest else today.isoformat()
     template = next((f for f in reversed(_deck_files(store)) if f.suffix == ".pptx"), None)
     pptx_path = out_dir / f"{stamp} Board Report DRAFT.pptx"
     pack_render.build(spec, str(template), str(pptx_path))

@@ -610,7 +610,10 @@ def cmd_run(args):
                 remote.pull(f"board/drafts/{n}")
         if args.only == "pack":
             remote.pull("board/style/style_guide.md")
+            if args.meeting:
+                remote.pull(f"board/style/style_guide_before_{args.meeting}.md")
             remote.pull("board/pack_lessons.json")
+            remote.pull("board/pack_guidance.md")
             for n in remote.list("board/sent"):
                 remote.pull(f"board/sent/{n}")
             decks = sorted(n for n in remote.list("board/packs")
