@@ -15,7 +15,7 @@ TOOLS = {
                               ' && node generate_board_deck.js --data board_report_data.json'},
     "diary":          {"title": "Plan diary blocks",
                        "cmd": '"{py}" outlook_scheduler.py dashboard'},
-    "weekly_setup":   {"title": "Sign in for the Sunday run",
+    "weekly_setup":   {"title": "Microsoft sign-in (all processes)",
                        "cmd": '"{py}" weekly_plan.py setup'},
     "weekly_local":   {"title": "Weekly plan (on this PC)",
                        "cmd": '"{py}" weekly_plan.py run --days {days}'},

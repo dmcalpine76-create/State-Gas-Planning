@@ -36,8 +36,11 @@ load_dotenv(HERE / ".env")
 
 AEST       = datetime.timezone(datetime.timedelta(hours=10))
 CLOUD      = os.environ.get("CI") == "true"
-SCOPES     = ["Mail.ReadWrite", "Mail.Send", "Calendars.Read",
-              "Tasks.ReadWrite", "Files.ReadWrite", "User.Read"]
+# One Microsoft sign-in for every process (morning briefing, Friday wrap,
+# Sunday plan, board tools, inbox_actions): the union of what each needs.
+SCOPES     = ["Mail.ReadWrite", "Mail.Read", "Mail.Send", "Calendars.ReadWrite",
+              "Calendars.Read", "Tasks.ReadWrite", "Files.ReadWrite", "User.Read"]
+MB_REPO    = "dmcalpine76-create/morning-briefing"
 CACHE_FILE = HERE / ".weekly_token_cache.bin"
 TASK_LIST  = "Daily Priorities"
 SITE       = "https://dmcalpine76-create.github.io/State-Gas-Planning"
@@ -105,8 +108,8 @@ def _github_token() -> str:
     return (tok or "").strip()
 
 
-def put_secret(name: str, value: str) -> bool:
-    """Store a GitHub Actions secret on the planning repository."""
+def put_secret(name: str, value: str, repo: str = REPO) -> bool:
+    """Store a GitHub Actions secret on a repository (the planning one by default)."""
     import requests
     try:
         from nacl import encoding, public
@@ -118,16 +121,43 @@ def put_secret(name: str, value: str) -> bool:
     if not tok:
         return False
     h = {"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json"}
-    k = requests.get(f"https://api.github.com/repos/{REPO}/actions/secrets/public-key",
+    k = requests.get(f"https://api.github.com/repos/{repo}/actions/secrets/public-key",
                      headers=h, timeout=30)
     k.raise_for_status()
     k = k.json()
     box = public.SealedBox(public.PublicKey(k["key"].encode(), encoding.Base64Encoder()))
     enc = base64.b64encode(box.encrypt(value.encode())).decode()
-    r = requests.put(f"https://api.github.com/repos/{REPO}/actions/secrets/{name}",
+    r = requests.put(f"https://api.github.com/repos/{repo}/actions/secrets/{name}",
                      headers=h, json={"encrypted_value": enc, "key_id": k["key_id"]},
                      timeout=30)
     return r.status_code in (201, 204)
+
+
+def share_signin(text: str) -> list:
+    """Give every process the same sign-in. Returns what could not be updated."""
+    failed = []
+    if not put_secret("WEEKLY_TOKEN_CACHE", text):
+        failed.append("Sunday run (cloud)")
+    if not (put_secret("OUTLOOK_TOKEN_CACHE", text, MB_REPO)
+            and put_secret("OUTLOOK_TOKEN_SETUP_DATE", datetime.date.today().isoformat(), MB_REPO)):
+        failed.append("morning briefing and Friday wrap (cloud)")
+    return failed
+
+
+def _share_locally(text: str):
+    """Laptop copies: inbox_actions / diary / board tools, and the local briefing."""
+    for f in (HERE / ".outlook_token_cache.bin",
+              HERE.parent / "morning briefing system" / ".outlook_token_cache.bin"):
+        if not f.parent.exists():
+            continue
+        if f.exists():
+            bak = f.with_name(f.name + ".before-shared-signin")
+            if not bak.exists():
+                bak.write_bytes(f.read_bytes())
+        f.write_text(text, encoding="utf-8")
+    setup = HERE.parent / "morning briefing system" / ".outlook_token_setup"
+    if setup.parent.exists():
+        setup.write_text(datetime.date.today().isoformat(), encoding="utf-8")
 
 
 def cmd_setup(_args):
@@ -140,7 +170,7 @@ def cmd_setup(_args):
         if "user_code" not in flow:
             raise SystemExit(f"Could not start sign-in: {flow.get('error_description')}")
         print("\n" + "=" * 64)
-        print("  SIGN IN FOR THE SUNDAY WEEKLY RUN")
+        print("  MICROSOFT SIGN-IN FOR ALL STATE GAS PROCESSES")
         print("=" * 64)
         print(f"\n  1. Go to:    {flow['verification_uri']}")
         print(f"  2. Enter:    {flow['user_code']}")
@@ -153,13 +183,17 @@ def cmd_setup(_args):
         result = app.acquire_token_by_device_flow(flow)
     if "access_token" not in result:
         raise SystemExit(f"Sign-in failed: {result.get('error_description')}")
-    CACHE_FILE.write_text(cache.serialize(), encoding="utf-8")
+    text = cache.serialize()
+    CACHE_FILE.write_text(text, encoding="utf-8")
     print("  Signed in.")
-    if put_secret("WEEKLY_TOKEN_CACHE", CACHE_FILE.read_text(encoding="utf-8")):
-        print("  Cloud copy of the sign-in updated - the Sunday run can use it.")
+    _share_locally(text)
+    print("  Laptop tools updated (inbox actions, diary, board tools, local briefing).")
+    failed = share_signin(text)
+    if not failed:
+        print("  Cloud copies updated - morning briefing, Friday wrap and Sunday run "
+              "all use this sign-in.")
     else:
-        print("  !! Could not update the cloud copy (GitHub key missing or lacks "
-              "Secrets permission). Tell Claude.")
+        print("  !! Could not update: " + ", ".join(failed) + ". Tell Claude.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -711,8 +745,11 @@ def cmd_run(args):
 
     if CLOUD and CACHE_FILE.exists() and os.environ.get("GH_SECRETS_TOKEN"):
         if CACHE_FILE.read_text(encoding="utf-8") != os.environ.get("WEEKLY_TOKEN_CACHE_ORIG", ""):
-            say("Sign-in refreshed" if put_secret("WEEKLY_TOKEN_CACHE", CACHE_FILE.read_text(encoding="utf-8"))
-                else "!! Could not save the refreshed sign-in")
+            # The refreshed sign-in goes to every cloud process, which keeps the
+            # morning briefing's sign-in alive too (no more 90-day re-sign-in).
+            failed = share_signin(CACHE_FILE.read_text(encoding="utf-8"))
+            say("Sign-in refreshed for all processes" if not failed
+                else f"!! Could not save the refreshed sign-in ({len(failed)} place(s))")
     say("Done")
 
 
