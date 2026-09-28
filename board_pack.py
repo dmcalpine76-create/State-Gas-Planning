@@ -320,11 +320,10 @@ def _meeting_iso(text: str):
 def learn_from_finals(token, client, store: Path, model=None) -> int:
     """
     For each earlier draft whose meeting has now happened, find the final deck
-    the MD presented (knowledge store board/packs, else the SharePoint meeting
-    folder), save its text as the new roll-forward point, and record what he
-    changed as lessons for future drafts (board/pack_lessons.json).
+    the MD saved into the knowledge store (board/packs, named with the meeting
+    date) and record what he changed as lessons for future drafts
+    (board/pack_lessons.json).
     """
-    import tempfile
     import board_sources as bs
     lf = store / "board" / "pack_lessons.json"
     book = _read(lf, {"lessons": []})
@@ -342,17 +341,6 @@ def learn_from_finals(token, client, store: Path, model=None) -> int:
         for f in _deck_files(store):
             if _date_of(f) == miso:
                 final = _load_deck(f)
-        if final is None:
-            for d in bs.final_decks(token, store, miso):
-                with tempfile.NamedTemporaryFile(suffix=".pptx", delete=False) as t:
-                    t.write(d["fetch"]())
-                slides = read_deck(t.name)
-                first = deck_as_text(slides[:1], 2000)
-                if spec.get("meeting_date", "~").lower() in first.lower():
-                    final = slides
-                    out = store / "board" / "packs" / f"{miso} Board Report.deck.json"
-                    out.write_text(json.dumps(slides, ensure_ascii=False), encoding="utf-8")
-                    break
         if final is None:
             continue
         slim = {k: spec.get(k) for k in ("exec", "strategy_pages", "cashflow", "other_matters")}
@@ -474,7 +462,7 @@ def make_pack(token, client, store: Path, emails: list, events: list, say=print,
     import board_sources as bs
     until = md.isoformat() if backtest else today.isoformat()
     try:
-        mins = bs.last_minutes(token, store, until)
+        mins = bs.last_minutes(store, until)
         ctx["minutes"], ctx["minutes_ref"] = mins.get("text", ""), (
             f"{mins['folder']}/{mins['name']}, saved {mins['saved']}" if mins else "")
     except Exception as ex:

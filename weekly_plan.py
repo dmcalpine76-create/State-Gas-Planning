@@ -39,8 +39,7 @@ CLOUD      = os.environ.get("CI") == "true"
 # One Microsoft sign-in for every process (morning briefing, Friday wrap,
 # Sunday plan, board tools, inbox_actions): the union of what each needs.
 SCOPES     = ["Mail.ReadWrite", "Mail.Read", "Mail.Send", "Calendars.ReadWrite",
-              "Calendars.Read", "Tasks.ReadWrite", "Files.ReadWrite", "Sites.Read.All",
-              "User.Read"]
+              "Calendars.Read", "Tasks.ReadWrite", "Files.ReadWrite", "User.Read"]
 MB_REPO    = "dmcalpine76-create/morning-briefing"
 CACHE_FILE = HERE / ".weekly_token_cache.bin"
 TASK_LIST  = "Daily Priorities"
@@ -91,11 +90,6 @@ def get_token() -> str:
     app = _msal_app(cache)
     accounts = app.get_accounts()
     result = app.acquire_token_silent(SCOPES, account=accounts[0]) if accounts else None
-    if accounts and (not result or "access_token" not in result):
-        # An older sign-in without the newer SharePoint permission still runs
-        # everything else; only the board meeting folders are unavailable.
-        result = app.acquire_token_silent([x for x in SCOPES if x != "Sites.Read.All"],
-                                          account=accounts[0])
     if not result or "access_token" not in result:
         raise SystemExit("Sign-in needed: on the laptop, press 'Microsoft sign-in (all processes)' "
                          "in the Control Room (or run: py weekly_plan.py setup).")
@@ -620,7 +614,8 @@ def cmd_run(args):
                 remote.pull(f"board/style/style_guide_before_{args.meeting}.md")
             remote.pull("board/pack_lessons.json")
             remote.pull("board/pack_guidance.md")
-            remote.pull("board/sources.json")
+            for n in remote.list("board/minutes"):
+                remote.pull(f"board/minutes/{n}")
             remote.pull("board/notes_for_next_meeting.md")
             for n in remote.list("board/packs/drafts"):
                 if n.endswith("spec.json"):

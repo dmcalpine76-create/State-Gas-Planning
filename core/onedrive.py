@@ -44,12 +44,19 @@ class OneDriveStore:
                 raise FileNotFoundError(f"store file missing: {rel}")
             return False
         meta.raise_for_status()
-        self.etags[rel] = meta.json().get("eTag")
+        info = meta.json()
+        self.etags[rel] = info.get("eTag")
         data = requests.get(self._url(rel, ":/content"), headers=self._h(), timeout=120)
         data.raise_for_status()
         dest = self.local / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(data.content)
+        try:                    # keep OneDrive's modified date, so file dates mean the same in the cloud
+            import os, datetime as _dt
+            ts = _dt.datetime.fromisoformat(info["lastModifiedDateTime"].replace("Z", "+00:00")).timestamp()
+            os.utime(dest, (ts, ts))
+        except Exception:
+            pass
         self.hashes[rel] = data.content
         return True
 

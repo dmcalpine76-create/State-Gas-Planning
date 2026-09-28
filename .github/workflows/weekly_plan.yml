@@ -41,7 +41,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install
-        run: pip install -q msal requests anthropic python-dotenv cryptography pynacl python-pptx python-docx
+        run: pip install -q msal requests anthropic python-dotenv cryptography pynacl python-pptx python-docx pypdf
 
       # JSON round trip in Python: piping multi-line JSON through bash breaks MSAL.
       - name: Restore sign-in
