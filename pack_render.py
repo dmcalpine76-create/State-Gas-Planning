@@ -229,6 +229,8 @@ class Deck:
         """A strategy page. Splits onto continuation pages when long."""
         norm = lambda t: re.sub(r"\W+", "", (t or "").lower())
         paras = [p for p in paras if norm(p.get("text")) not in (norm(title), "")]
+        if paras and all(p.get("level", 0) for p in paras):   # title echo removed: lift the body
+            paras = [{**p, "level": p["level"] - 1} for p in paras]
         pages, cur, used = [], [], 0.0
         width = 4.9 if image_note else 9.23
         cap = BODY_BOTTOM - BODY_TOP - 0.1 - (0.3 if intro else 0)
