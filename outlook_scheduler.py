@@ -1379,7 +1379,7 @@ def serve_dashboard(api_key: str = None) -> None:
                         _tok = _get_token()
                     except Exception:
                         _tok = token
-                    raw_tasks = fetch_todo_tasks(_tok, rules, lookback_hours=_lb)
+                    raw_tasks = fetch_todo_tasks(_tok, rules, lookback_days=max(1, -(-_lb // 24)))  # page sends hours
                     tasks_out = [
                         {
                             "id":        t["id"],
