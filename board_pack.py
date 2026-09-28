@@ -76,7 +76,8 @@ def gather(store: Path, prior_name: str = None, cutoff: str = None):
         if f.stem >= since:
             t = f.read_text(encoding="utf-8", errors="ignore")
             if "teams.microsoft.com" not in t and len(t) > 300:
-                sent.append({"date": f.stem, "text": t[:9000]})
+                sent.append({"date": f.stem, "text": t[:6000]})
+    sent.sort(key=lambda x: x["date"], reverse=True)     # newest first survives the cap
     matters = _read(store / "matters.json", {"matters": {}}).get("matters", {})
     keys = ("category", "description", "next_step", "next_step_due", "last_active")
     if cutoff:
@@ -123,7 +124,7 @@ HIS STANDING GUIDANCE FOR THE PACK: {ctx.get("guidance") or "(none)"}
 
 EVIDENCE SINCE THE LAST BOARD REPORT ({ctx["since"]}), in priority order:
 1. What he has told the directors since (weekly updates and notes):
-{json.dumps(ctx["sent"], ensure_ascii=False)[:30000] or "(none found)"}
+{json.dumps(ctx["sent"], ensure_ascii=False)[:40000] or "(none found)"}
 
 2. Company knowledge - active matters (status, next steps):
 {json.dumps(ctx["matters"], ensure_ascii=False)[:22000]}
@@ -355,7 +356,8 @@ def make_pack(token, client, store: Path, emails: list, events: list, say=print,
     ctx = gather(store, prior_name, md.isoformat() if backtest else None)
     if backtest:   # re-drafting a past meeting: only what was known before it
         cut = md.isoformat()
-        emails = [m for m in emails if (m.get("receivedDateTime") or m.get("sentDateTime") or "")[:10] < cut]
+        emails = [m for m in emails
+                  if (m.get("datetime") or m.get("receivedDateTime") or m.get("sentDateTime") or "9999")[:10] < cut]
         ctx["sent"] = [x for x in ctx["sent"] if x["date"] < cut]
     ctx["email"] = build_email_context(emails)
     meeting_date = f"{md.day} {md:%B %Y}"

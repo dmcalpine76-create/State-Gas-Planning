@@ -61,10 +61,13 @@ def fetch_sent_updates(token: str, store: Path, days: int = 180) -> list:
                       timeout=30).json()
     mine = (me.get("mail") or me.get("userPrincipalName") or "").lower()
     since = (datetime.datetime.utcnow() - datetime.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Headers only first: a busy Sent folder holds thousands of messages over
+    # six months, and the old 600-message cap (with bodies) only reached back
+    # a few weeks. Bodies are fetched below for the few that qualify.
     url, params, msgs = f"{GRAPH}/me/mailFolders/sentitems/messages", {
-        "$filter": f"sentDateTime ge {since}", "$orderby": "sentDateTime desc", "$top": "100",
-        "$select": "subject,sentDateTime,toRecipients,ccRecipients,body"}, []
-    while url and len(msgs) < 600:
+        "$filter": f"sentDateTime ge {since}", "$orderby": "sentDateTime desc", "$top": "250",
+        "$select": "id,subject,sentDateTime,toRecipients,ccRecipients"}, []
+    while url and len(msgs) < 6000:
         r = requests.get(url, headers=h, params=params, timeout=60)
         r.raise_for_status()
         d = r.json()
@@ -87,7 +90,15 @@ def fetch_sent_updates(token: str, store: Path, days: int = 180) -> list:
         subj = (m.get("subject") or "")
         if subj.lower().startswith(("re:", "fw:", "fwd:")):
             continue
-        raw = (m.get("body") or {}).get("content", "")
+        rc0 = recips(m)
+        if not ("board update" in subj.lower()
+                or (directors and len(rc0 & directors) >= 2 and len(rc0 & directors) >= 0.6 * len(rc0))):
+            continue
+        b = requests.get(f"{GRAPH}/me/messages/{m['id']}", headers=h,
+                         params={"$select": "body"}, timeout=60)
+        if not b.ok:
+            continue
+        raw = (b.json().get("body") or {}).get("content", "")
         if "teams.microsoft.com/meet" in raw or "Microsoft Teams meeting" in raw:
             continue                                # meeting invites
         text = _clean(raw)
@@ -97,7 +108,7 @@ def fetch_sent_updates(token: str, store: Path, days: int = 180) -> list:
         if titled or (to_board and len(text) >= 400):
             out.append({"date": m["sentDateTime"][:10], "subject": subj,
                         "kind": "update" if titled else "note", "text": text[:12000]})
-    for u in out[:12]:                              # keep a readable history
+    for u in out:                                   # keep the full history
         f = store / "board" / "sent" / f"{u['date']}.txt"
         if not f.exists():
             f.parent.mkdir(parents=True, exist_ok=True)

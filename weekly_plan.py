@@ -768,6 +768,18 @@ def run_pack(args, token, store, remote, today):
     start = datetime.datetime.combine(today, datetime.time(), AEST)
     events = fetch_calendar(token, start, start + datetime.timedelta(days=45))
     say(f"Read {len(emails)} emails and {len(events)} calendar entries")
+    try:                                   # refresh the record of what you told the board
+        import board_weekly as bw
+        with quiet():
+            sent = bw.fetch_sent_updates(token, store, days=max(days + 60, 180))
+        say(f"Read {len(sent)} past board updates and notes")
+        if remote:
+            d = store / "board" / "sent"
+            for fp in (d.iterdir() if d.exists() else []):
+                rel = f"board/sent/{fp.name}"
+                remote.push(rel, force_new=rel not in remote.hashes)
+    except Exception as ex:
+        say(f"!! Could not refresh past board updates ({type(ex).__name__})")
     with quiet():
         out = board_pack.make_pack(token, get_client(), store, emails, events, say=lambda m: None,
                                    prior_name=args.prior or None, meeting=args.meeting or None,
