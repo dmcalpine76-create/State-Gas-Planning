@@ -2,7 +2,7 @@
 launcher.py - lets the State Gas control app start your planning tools on
 this PC, so you press a button instead of typing into a Command Prompt.
 
-It listens on this computer only (127.0.0.1:8765) and will only start a
+It listens on this computer only (127.0.0.1:8790) and will only start a
 fixed list of tools, only when asked by your control app's page, and only
 with the pairing key held in launcher_key.txt. Each tool opens in its own
 Command Prompt window, exactly as if you had typed the command yourself.
@@ -23,7 +23,7 @@ from urllib.parse import urlparse, parse_qs
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 HERE     = Path(__file__).resolve().parent
-PORT     = 8765
+PORT     = 8790   # not 8765-8768: inbox review and the diary dashboard use those
 APP_URL  = "https://dmcalpine76-create.github.io/State-Gas-Planning/"
 ALLOWED  = {"https://dmcalpine76-create.github.io"}
 KEY_FILE = HERE / "launcher_key.txt"

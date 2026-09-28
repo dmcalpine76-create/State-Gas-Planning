@@ -142,7 +142,7 @@ summary{cursor:pointer;font-weight:700;padding:12px 0}
       <div>
         <strong>Laptop launcher</strong>
         <p>Lets the buttons above start tools on your PC. Start it by double-clicking <em>Control Room launcher</em> in the state gas planning folder; it pairs itself with this page. To pair again, make sure it is running and press Pair.</p>
-        <div class="pair"><a class="btn" href="http://127.0.0.1:8765/pair">Pair with launcher</a><button class="ghost" id="unpair">Forget pairing</button></div>
+        <div class="pair"><a class="btn" href="http://127.0.0.1:8790/pair">Pair with launcher</a><button class="ghost" id="unpair">Forget pairing</button></div>
       </div>
       <div>
         <strong>Sunday run sign-in</strong>
@@ -169,7 +169,7 @@ summary{cursor:pointer;font-weight:700;padding:12px 0}
     weekly:   { repo: "State-Gas-Planning", wf: "weekly_plan.yml", base: {}, meta: "meta-weekly" },
     pack:     { repo: "State-Gas-Planning", wf: "weekly_plan.yml", base: { only: "pack" }, meta: "meta-board_briefing" },
   };
-  const LAUNCHER = "http://127.0.0.1:8765";
+  const LAUNCHER = "http://127.0.0.1:8790";
   const store = {
     get(k){ try { return localStorage.getItem(k) || ""; } catch { return ""; } },
     set(k,v){ try { v ? localStorage.setItem(k,v) : localStorage.removeItem(k); } catch {} },
