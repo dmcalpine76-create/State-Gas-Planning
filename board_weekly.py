@@ -66,7 +66,7 @@ def fetch_sent_updates(token: str, store: Path, days: int = 180) -> list:
     # a few weeks. Bodies are fetched below for the few that qualify.
     url, params, msgs = f"{GRAPH}/me/mailFolders/sentitems/messages", {
         "$filter": f"sentDateTime ge {since}", "$orderby": "sentDateTime desc", "$top": "250",
-        "$select": "id,subject,sentDateTime,toRecipients,ccRecipients"}, []
+        "$select": "id,subject,sentDateTime,toRecipients,ccRecipients,bccRecipients"}, []
     while url and len(msgs) < 6000:
         r = requests.get(url, headers=h, params=params, timeout=60)
         r.raise_for_status()
@@ -78,6 +78,7 @@ def fetch_sent_updates(token: str, store: Path, days: int = 180) -> list:
     directors = set(_read(dir_file, {"emails": []}).get("emails", []))
     recips = lambda m: {x["emailAddress"]["address"].lower()
                         for x in m.get("toRecipients", []) + m.get("ccRecipients", [])
+                        + m.get("bccRecipients", [])
                         if x.get("emailAddress", {}).get("address")} - {mine}
     for m in msgs:                                  # learn directors from titled updates
         if "board update" in (m.get("subject") or "").lower():
