@@ -13,7 +13,7 @@ on:
       only:
         description: "What to run"
         type: choice
-        options: [all, board, plan, pack]
+        options: [all, board, plan, pack, brief]
         default: all
       prior:
         description: "Board pack: previous deck to roll forward from (optional, e.g. 2026-08-06)"
