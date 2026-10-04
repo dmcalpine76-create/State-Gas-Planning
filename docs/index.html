@@ -85,12 +85,7 @@ summary{cursor:pointer;font-weight:700;padding:12px 0}
         <div class="controls"><button data-cloud="briefing">Re-run now</button></div>
       </div>
       <div class="row">
-        <div><h3>Friday wrap</h3><p>Fridays at 4:30pm: what slipped, next week's shape, deadline radar.</p>
-          <div class="meta" id="meta-wrap">Last run: checking</div></div>
-        <div class="controls"><button data-cloud="wrap">Re-run now</button></div>
-      </div>
-      <div class="row">
-        <div><h3>Sunday weekly plan</h3><p>Sundays at 5pm: brings the knowledge base up to date and plans your week. Arrives by email with a link to the plan.</p>
+        <div><h3>Week planner</h3><p>Sundays at 5pm: brings the knowledge base up to date and plans your week (what slipped, next week's shape, deadlines, prep). Run inbox actions first for an up-to-date task list. Arrives by email with a link.</p>
           <div class="meta" id="meta-weekly">Last run: checking</div></div>
         <div class="controls">
           <label class="days" for="days-weekly">Days <input type="number" id="days-weekly" min="1" max="60" value="7"></label>
@@ -113,7 +108,7 @@ summary{cursor:pointer;font-weight:700;padding:12px 0}
         </div>
       </div>
       <div class="row">
-        <div><h3>Plan diary blocks</h3><p>Opens your scheduling dashboard to book time in Outlook for this week's tasks, including blocks suggested by the Sunday plan.</p>
+        <div><h3>Plan diary blocks</h3><p>Opens your scheduling dashboard to book time in Outlook for this week's tasks, including blocks suggested by the Week planner.</p>
           <div class="meta" id="meta-diary"></div></div>
         <div class="controls"><button data-local="diary">Open</button></div>
       </div>
@@ -146,7 +141,7 @@ summary{cursor:pointer;font-weight:700;padding:12px 0}
       </div>
       <div>
         <strong>Sunday run sign-in</strong>
-        <p>The Sunday plan runs in the cloud and needs its own Microsoft sign-in, including access to your knowledge folder in OneDrive. Do this once, and again if the Sunday email says the sign-in has expired.</p>
+        <p>The Week planner, morning briefing and board tools run in the cloud and need their own Microsoft sign-in, including access to your knowledge folder in OneDrive. Do this once, and again if the Week planner email says the sign-in has expired.</p>
         <div class="pair"><button data-local="weekly_setup">Microsoft sign-in (all processes)</button></div>
       </div>
       <div>
@@ -165,7 +160,6 @@ summary{cursor:pointer;font-weight:700;padding:12px 0}
   const OWNER = "dmcalpine76-create";
   const CLOUD = {
     briefing: { repo: "morning-briefing", wf: "generate.yml", inputs: { reason: "Control Room re-run" }, meta: "meta-briefing" },
-    wrap:     { repo: "morning-briefing", wf: "friday_wrap.yml", inputs: null, meta: "meta-wrap" },
     weekly:   { repo: "State-Gas-Planning", wf: "weekly_plan.yml", base: {}, meta: "meta-weekly" },
     pack:     { repo: "State-Gas-Planning", wf: "weekly_plan.yml", base: { only: "pack" }, meta: "meta-board_briefing" },
   };

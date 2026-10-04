@@ -1,5 +1,5 @@
 """
-weekly_plan.py - the Sunday weekly planning run.
+weekly_plan.py - the Week planner (Sunday 5pm; formerly the Sunday weekly plan run).
 
 Every Sunday at 5pm (GitHub Actions) it:
   1. reads your week: email, the Daily Priorities list in To Do, your calendar
@@ -461,6 +461,20 @@ footer{color:var(--muted);font-size:12.5px}
 """
 
 
+def _freshness(stats, today) -> str:
+    """When inbox actions last ran: the To Do picture is only as current as that."""
+    last = stats.get("inbox_last") or ""
+    try:
+        d = datetime.date.fromisoformat(last[:10])
+    except ValueError:
+        return '<p class="muted" style="font-size:13px">Inbox actions: no record of a run.</p>'
+    age = (today - d).days
+    when = "today" if age == 0 else "yesterday" if age == 1 else f"{age} days ago"
+    cls = "bad" if age > 3 else "muted"
+    tail = " - tasks from email since then are not in this plan yet" if age > 3 else ""
+    return f'<p class="{cls}" style="font-size:13px">Inbox actions last run {when} ({d:%a %d %b}){tail}.</p>'
+
+
 def render(a, p, patch, stats, today) -> str:
     from html import escape as e
     wk = a["monday"]
@@ -514,8 +528,9 @@ def render(a, p, patch, stats, today) -> str:
 
     return f"""<!doctype html><html lang="en-AU"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
-<title>Weekly Plan {wk:%d %b}</title><style>{CSS}</style></head><body><div class="wrap">
-<header><small>State Gas · Weekly plan</small><h1>Week of {wk:%A %d %B %Y}</h1></header>
+<title>Week planner {wk:%d %b}</title><style>{CSS}</style></head><body><div class="wrap">
+<header><small>State Gas · Week planner</small><h1>Week of {wk:%A %d %B %Y}</h1></header>
+{_freshness(stats, today)}
 <p class="lead">{e(p.get("headline","The planning step did not return a summary this week."))}</p>
 <section><h2>Priorities</h2><div class="card">{items(pri)}</div></section>
 <section><h2>Deadlines · next six weeks</h2><div class="card">{dl}</div></section>
@@ -564,12 +579,12 @@ def send_email(token, to_addr, a, p, url) -> None:
     due = "".join(f"<li>{_d(d['date']):%a %d %b}: {e(d.get('title',''))}</li>" for d in a["deadlines"][:5])
     body = f"""<div style="font-family:Aptos,Segoe UI,sans-serif;font-size:11pt;color:#1A1A1A">
 <p>{e(p.get('headline',''))}</p>
-<p><a href="{url}" style="color:#A51C30;font-weight:bold">Open the full weekly plan</a></p>
+<p><a href="{url}" style="color:#A51C30;font-weight:bold">Open the full week planner</a></p>
 <p><b>Priorities</b></p><ol>{pri}</ol>
 {'<p><b>Next deadlines</b></p><ul>' + due + '</ul>' if due else ''}
 <p style="color:#6B6264;font-size:9pt">The link carries the key that unlocks the page; keep this email to yourself.
 A copy is saved in your state gas knowledge folder under weekly.</p></div>"""
-    msg = {"message": {"subject": f"Weekly plan — week of {a['monday']:%a %d %b}",
+    msg = {"message": {"subject": f"Week planner — week of {a['monday']:%a %d %b}",
                        "body": {"contentType": "HTML", "content": body},
                        "toRecipients": [{"emailAddress": {"address": to_addr}}]},
            "saveToSentItems": False}
@@ -590,7 +605,7 @@ STORE_FILES = ["matters.json", "people.json", "facts.json", "company_config.json
 
 def cmd_run(args):
     today = datetime.datetime.now(AEST).date()
-    say(f"Weekly plan run - {today:%a %d %b %Y}")
+    say(f"Week planner run - {today:%a %d %b %Y}")
     token = get_token()
     say("Signed in")
 
@@ -721,6 +736,7 @@ def cmd_run(args):
     say(f"Plan written: {len(p.get('priorities', []))} priorities, "
         f"{len(p.get('diary_blocks', []))} diary blocks")
     stats["board"] = len(board["items"]) if board else None
+    stats["inbox_last"] = (inbox_state.get("last_updated") or "")[:16]
     html_text = render(a, p, patch, stats, today)
 
     # 4. keep it: plan + this week's task snapshot in the store

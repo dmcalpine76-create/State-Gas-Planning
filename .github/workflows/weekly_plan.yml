@@ -1,6 +1,6 @@
 # Sunday weekly plan - 4:47pm AEST Sunday (06:47 UTC), ready by 5pm.
 # Run logs are public: weekly_plan.py prints counts only, never content.
-name: Sunday weekly plan
+name: Week planner
 
 on:
   schedule:
