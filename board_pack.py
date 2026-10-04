@@ -111,6 +111,17 @@ def gather(store: Path, prior_name: str = None, cutoff: str = None):
     }
 
 
+def _answers_block(ctx) -> str:
+    a = ctx.get("answers") or {}
+    if not a:
+        return ""
+    return ("THE MD'S DECISIONS FOR THIS REPORT - BINDING. He reviewed a proposed outline and decided the\n"
+            "following. Follow them exactly: these headlines and emphasis, these summary boxes in this order,\n"
+            "these strategy papers in this order, these Other matters calls, and treat his answers as fact\n"
+            "(they override anything in the evidence below):\n"
+            + json.dumps(a, ensure_ascii=False, indent=1)[:12000] + "\n")
+
+
 def _common(ctx, meeting_date):
     return f"""You are drafting part of the monthly Executive Board Report that the Managing
 Director of an ASX-listed Queensland gas company presents to his board on {meeting_date}.
@@ -122,6 +133,7 @@ LESSONS FROM HOW HE CHANGED EARLIER DRAFTS: {json.dumps(ctx["lessons"], ensure_a
 STANDING INSTRUCTIONS: {ctx["instructions"] or "(none)"}
 HIS STANDING GUIDANCE FOR THE PACK: {ctx.get("guidance") or "(none)"}
 
+{_answers_block(ctx)}
 EVIDENCE SINCE THE LAST BOARD REPORT ({ctx["since"]}), in priority order:
 A. HIS OWN NOTES FOR THIS MEETING (calls, meetings, his current thinking - treat as authoritative
    and give it prominence; these are often the strategic points email does not show):
@@ -409,6 +421,7 @@ def write_bridge(path, spec, parts, ctx):
                       f"Minutes used: {ctx.get('minutes_ref') or 'none found'}. "
                       f"Market context: {'yes' if ctx.get('market') else 'none'}. "
                       f"Your notes: {'yes' if ctx.get('notes') else 'none'}. "
+                      f"Your decisions from the brief: {'yes' if ctx.get('answers') else 'none'}. "
                       "Draft for the MD's review - not for circulation.")
     if parts["plan"].get("flags"):
         doc.add_heading("Flags for you", 1)
@@ -445,8 +458,9 @@ def write_bridge(path, spec, parts, ctx):
     doc.save(path)
 
 
-def make_pack(token, client, store: Path, emails: list, events: list, say=print,
-              prior_name: str = None, meeting: str = None, model: str = None) -> dict:
+def build_context(token, client, store: Path, emails: list, events: list, say=print,
+                  prior_name: str = None, meeting: str = None, model: str = None):
+    """Everything the brief and the pack draw on. Returns (ctx, md, backtest)."""
     from core.graph import build_email_context
     store = Path(store)
     today = datetime.date.today()
@@ -476,9 +490,121 @@ def make_pack(token, client, store: Path, emails: list, events: list, say=print,
                   if (m.get("datetime") or m.get("receivedDateTime") or m.get("sentDateTime") or "9999")[:10] < cut]
         ctx["sent"] = [x for x in ctx["sent"] if x["date"] < cut]
     ctx["email"] = build_email_context(emails)
+    return ctx, md, backtest
+
+
+def _brief_paths(store: Path, md):
+    d = store / "board" / "briefs"
+    k = md.isoformat()
+    return d / f"{k} brief.json", d / f"{k} answers.json", d / f"{k} brief.md"
+
+
+def make_brief(token, client, store: Path, emails: list, events: list, say=print,
+               prior_name: str = None, meeting: str = None, model: str = None) -> dict:
+    """
+    Step 1 of the board pack: a proposed outline and the questions only the MD
+    can answer. Saved to board/briefs/<meeting> brief.json (and .md to read).
+    """
+    store = Path(store)
+    ctx, md, backtest = build_context(token, client, store, emails, events, say,
+                                      prior_name, meeting, model)
     meeting_date = f"{md.day} {md:%B %Y}"
+    prior_boxes = [t["paras"][0]["text"] for s in ctx["prior"] if "executive summary" in (s["title"] or "").lower()
+                   for t in s["texts"] if t.get("heading") and t.get("paras")
+                   and not re.match(r"(\d+\.|executive summary|key )", t["paras"][0]["text"].lower())]
+    prior_pages = [_strip_num(s["title"]) for s in _strategy_slides(ctx["prior"])
+                   if "continued" not in (s["title"] or "").lower() and not re.match(r"^[A-Z]\.\s", s["title"])]
+    prior_rows = [r[:2] for s in ctx["prior"] if "other matters" in (s["title"] or "").lower()
+                  for t in s["tables"] for r in t[1:]]
+    prompt = _common(ctx, meeting_date) + f"""
+LAST BOARD REPORT:
+{ctx["prior_text"][:25000]}
+
+LAST MONTH'S SUMMARY BOXES: {json.dumps(prior_boxes, ensure_ascii=False)}
+LAST MONTH'S STRATEGY PAPERS: {json.dumps(prior_pages, ensure_ascii=False)}
+LAST MONTH'S OTHER MATTERS ROWS (area, matter): {json.dumps(prior_rows, ensure_ascii=False)}
+
+TASK: do NOT write the report. Prepare a short brief the MD will review with an assistant before
+the report is drafted, so that he makes the judgement calls. Be concrete and brief.
+- headlines: 5-7 candidate headlines (one sentence each) with the evidence for each.
+- boxes: last month's boxes (carry / drop, with why) plus any new candidates, each with 2-4
+  key points you would make.
+- papers: candidate strategy papers - last month's still live plus new ones the evidence
+  suggests - each with why, what the board would be asked to do, and your recommendation
+  (include / optional / not needed).
+- other_matters: every row from last month plus new candidates: proposal (update / drop /
+  new) and a one-line proposed update.
+- action_items: every decision, request and action item in the last minutes, what the
+  evidence shows about it, and status (done / in progress / no evidence).
+- cashflow: points the commentary needs that the evidence cannot settle.
+- questions: 5-10 pointed questions only the MD can answer - gaps (matters with no evidence
+  this period), judgement calls (lead paper, emphasis, what to ask the board), facts to
+  confirm. Each with why it matters and, where sensible, 2-4 suggested answers.
+
+Respond with JSON only:
+{{"headlines":[{{"text":"","evidence":""}}],
+ "boxes":[{{"title":"","status":"carry|drop|new","why":"","points":[""]}}],
+ "papers":[{{"title":"","why":"","ask":"","recommend":"include|optional|not needed"}}],
+ "other_matters":[{{"area":"","matter":"","proposal":"update|drop|new","draft":""}}],
+ "action_items":[{{"item":"","found":"","status":""}}],
+ "cashflow":[""],
+ "questions":[{{"q":"","why":"","options":[""]}}]}}"""
+    brief = _call(client, prompt, 9000, "board pack brief", model)
+    if not brief:
+        raise RuntimeError("brief step returned nothing")
+    brief["meeting"], brief["meeting_date"] = md.isoformat(), meeting_date
+    brief["evidence"] = {"prior": ctx["prior_file"], "since": ctx["since"],
+                         "minutes": ctx.get("minutes_ref", ""), "market": bool(ctx.get("market")),
+                         "notes": bool(ctx.get("notes")), "notes_to_directors": len(ctx["sent"]),
+                         "backtest": backtest}
+    bj, _, bm = _brief_paths(store, md)
+    bj.parent.mkdir(parents=True, exist_ok=True)
+    bj.write_text(json.dumps(brief, indent=1, ensure_ascii=False), encoding="utf-8")
+    bm.write_text(_brief_md(brief), encoding="utf-8")
+    return {"json": bj, "md": bm}
+
+
+def _brief_md(b: dict) -> str:
+    L = [f"# Board pack brief - {b.get('meeting_date','')}", "",
+         f"Evidence: {json.dumps(b.get('evidence', {}))}", "", "## Questions for you"]
+    for i, q in enumerate(b.get("questions", []), 1):
+        L.append(f"{i}. {q.get('q','')}  _({q.get('why','')})_")
+        if q.get("options"):
+            L.append("   Options: " + " / ".join(q["options"]))
+    L += ["", "## Candidate headlines"] + [f"- {h.get('text','')}  _[{h.get('evidence','')}]_" for h in b.get("headlines", [])]
+    L += ["", "## Summary boxes"]
+    for x in b.get("boxes", []):
+        L.append(f"- **{x.get('title','')}** ({x.get('status','')}) - {x.get('why','')}")
+        L += [f"  - {p}" for p in x.get("points", [])]
+    L += ["", "## Strategy papers"] + [f"- **{p.get('title','')}** [{p.get('recommend','')}] - {p.get('why','')} Ask: {p.get('ask','')}"
+                                        for p in b.get("papers", [])]
+    L += ["", "## Other matters"] + [f"- {r.get('area','')} | {r.get('matter','')} [{r.get('proposal','')}] {r.get('draft','')}"
+                                      for r in b.get("other_matters", [])]
+    L += ["", "## Last meeting's actions"] + [f"- {a.get('item','')} - {a.get('status','')}: {a.get('found','')}"
+                                              for a in b.get("action_items", [])]
+    L += ["", "## Cash flow points"] + [f"- {c}" for c in b.get("cashflow", [])]
+    return "\n".join(L) + "\n"
+
+
+def make_pack(token, client, store: Path, emails: list, events: list, say=print,
+              prior_name: str = None, meeting: str = None, model: str = None) -> dict:
+    store = Path(store)
+    today = datetime.date.today()
+    ctx, md, backtest = build_context(token, client, store, emails, events, say,
+                                      prior_name, meeting, model)
+    meeting_date = f"{md.day} {md:%B %Y}"
+    _, aj, _ = _brief_paths(store, md)
+    ctx["answers"] = _read(aj, {})
 
     plan = plan_and_summary(client, ctx, meeting_date, model)
+    agreed = [p for p in ctx["answers"].get("papers", []) if isinstance(p, dict) and p.get("title")]
+    if agreed:        # the MD's chosen papers, in his order, replace the model's choice
+        mine = {_strip_num(p.get("title", "")).lower(): p for p in plan.get("strategy_pages", [])}
+        plan["strategy_pages"] = [{**mine.get(p["title"].lower(), {}), "title": p["title"],
+                                   "purpose": p.get("purpose") or mine.get(p["title"].lower(), {}).get("purpose", ""),
+                                   "format": p.get("format") or mine.get(p["title"].lower(), {}).get("format", "narrative"),
+                                   "image_note": p.get("image_note") or mine.get(p["title"].lower(), {}).get("image_note")}
+                                  for p in agreed]
     if not plan.get("boxes"):
         raise RuntimeError("planning step returned nothing")
     for pg in plan.get("strategy_pages", []):

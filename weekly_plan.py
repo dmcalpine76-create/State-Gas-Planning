@@ -608,7 +608,9 @@ def cmd_run(args):
         for n in remote.list("board/drafts"):
             if n.endswith(".json") and n[:10] >= cutoff:
                 remote.pull(f"board/drafts/{n}")
-        if args.only == "pack":
+        if args.only in ("pack", "brief"):
+            for n in remote.list("board/briefs"):
+                remote.pull(f"board/briefs/{n}")
             remote.pull("board/style/style_guide.md")
             if args.meeting:
                 remote.pull(f"board/style/style_guide_before_{args.meeting}.md")
@@ -647,7 +649,7 @@ def cmd_run(args):
     prev = next((json.loads(p.read_text(encoding="utf-8")) for p in reversed(snaps_local)
                  if p.stem < today.isoformat()), None)
 
-    if args.only == "pack":
+    if args.only in ("pack", "brief"):
         return run_pack(args, token, store, remote, today)
 
     # 1. read the week
@@ -788,6 +790,25 @@ def run_pack(args, token, store, remote, today):
                 remote.push(rel, force_new=rel not in remote.hashes)
     except Exception as ex:
         say(f"!! Could not refresh past board updates ({type(ex).__name__})")
+    if args.only == "brief":
+        with quiet():
+            out = board_pack.make_brief(token, get_client(), store, emails, events, say=lambda m: None,
+                                        prior_name=args.prior or None, meeting=args.meeting or None,
+                                        model=os.environ.get("BOARD_PACK_MODEL") or None)
+        say("Board pack brief prepared")
+        if remote:
+            for key in ("json", "md"):
+                remote.push(out[key].relative_to(store).as_posix(), force_new=True)
+            for rel in ("board/pack_lessons.json", "board/notes_for_next_meeting.md"):
+                remote.push(rel, force_new=rel not in remote.hashes)
+            d = store / "board" / "notes_archive"
+            for fp in (d.glob("*") if d.exists() else []):
+                rel = f"board/notes_archive/{fp.name}"
+                if rel not in remote.hashes:
+                    remote.push(rel, force_new=True)
+            say("Saved to the knowledge folder: board/briefs")
+        say("Done (brief)")
+        return
     with quiet():
         out = board_pack.make_pack(token, get_client(), store, emails, events, say=lambda m: None,
                                    prior_name=args.prior or None, meeting=args.meeting or None,
@@ -814,7 +835,7 @@ def main():
     ap.add_argument("command", choices=["setup", "run"])
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--email", action="store_true")
-    ap.add_argument("--only", choices=["all", "board", "plan", "pack"], default="all")
+    ap.add_argument("--only", choices=["all", "board", "plan", "pack", "brief"], default="all")
     ap.add_argument("--prior", default="", help="board pack: roll forward from this deck (file name prefix)")
     ap.add_argument("--meeting", default="", help="board pack: meeting date YYYY-MM-DD")
     args = ap.parse_args()
