@@ -25,6 +25,7 @@ class OneDriveStore:
         self.local.mkdir(parents=True, exist_ok=True)
         self.etags = {}          # relative path -> eTag at download
         self.hashes = {}         # relative path -> content at download
+        self.conflicts = []      # files left alone because OneDrive changed them mid-run
 
     def _url(self, rel: str, suffix: str = "") -> str:
         path = "/".join(quote(p) for p in f"{self.base}/{rel}".split("/"))
@@ -82,8 +83,71 @@ class OneDriveStore:
         r = requests.put(self._url(rel, ":/content"), headers=self._h(headers),
                          data=body, timeout=120)
         if r.status_code == 412:
-            raise RuntimeError(f"{rel} changed in OneDrive during the run - not overwritten")
+            return self._resolve_conflict(rel, body)
         r.raise_for_status()
         self.etags[rel] = r.json().get("eTag")
         self.hashes[rel] = body
         return True
+
+    def _resolve_conflict(self, rel: str, body: bytes) -> bool:
+        """
+        OneDrive says the file changed since it was downloaded. Often only its
+        version tag moved (the OneDrive app re-saving it) and the content is the
+        same - then just save. If the content really changed and it is JSON,
+        merge the two (keeping both sides' entries). Otherwise leave OneDrive's
+        copy alone, note the conflict and carry on - never stop the whole run.
+        """
+        meta = requests.get(self._url(rel), headers=self._h(), timeout=60)
+        cur = requests.get(self._url(rel, ":/content"), headers=self._h(), timeout=120)
+        if not (meta.ok and cur.ok):
+            self.conflicts.append(rel)
+            return False
+        etag = meta.json().get("eTag")
+        if cur.content != self.hashes.get(rel, b"\0"):
+            merged = merge_json(cur.content, body) if rel.endswith(".json") else None
+            if merged is None:
+                self.conflicts.append(rel)
+                return False
+            body = merged
+        r = requests.put(self._url(rel, ":/content"),
+                         headers=self._h({"Content-Type": "application/octet-stream", "If-Match": etag}),
+                         data=body, timeout=120)
+        if not r.ok:
+            self.conflicts.append(rel)
+            return False
+        self.etags[rel] = r.json().get("eTag")
+        self.hashes[rel] = body
+        return True
+
+
+def merge_json(theirs: bytes, mine: bytes):
+    """
+    Merge two versions of a store JSON file. Dictionaries are combined key by
+    key (an entry only one side has is kept; for an entry both have, the one
+    with the later last_active / updated date wins, else this run's). Lists of
+    plain values are unioned. Returns bytes, or None if it can't be merged.
+    """
+    try:
+        a, b = json.loads(theirs), json.loads(mine)
+    except Exception:
+        return None
+
+    def stamp(x):
+        return (x.get("last_active") or x.get("updated") or x.get("last_updated") or "") if isinstance(x, dict) else ""
+
+    def m(x, y):
+        if isinstance(x, dict) and isinstance(y, dict):
+            out = dict(x)
+            for k, v in y.items():
+                if k not in out:
+                    out[k] = v
+                elif isinstance(out[k], dict) and isinstance(v, dict) and (stamp(out[k]) or stamp(v)):
+                    out[k] = out[k] if stamp(out[k]) > stamp(v) else v
+                else:
+                    out[k] = m(out[k], v)
+            return out
+        if isinstance(x, list) and isinstance(y, list) and all(not isinstance(i, (dict, list)) for i in x + y):
+            return x + [i for i in y if i not in x]
+        return y
+
+    return json.dumps(m(a, b), indent=2, ensure_ascii=False).encode("utf-8")

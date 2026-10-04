@@ -759,6 +759,8 @@ def cmd_run(args):
             failed = share_signin(CACHE_FILE.read_text(encoding="utf-8"))
             say("Sign-in refreshed for all processes" if not failed
                 else f"!! Could not save the refreshed sign-in ({len(failed)} place(s))")
+    if remote and remote.conflicts:
+        say(f"!! {len(remote.conflicts)} file(s) left as they were - changed in OneDrive during the run")
     say("Done")
 
 
