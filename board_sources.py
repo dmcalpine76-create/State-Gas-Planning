@@ -52,6 +52,7 @@ def last_minutes(store: Path, before: str) -> dict:
     if not d.exists():
         return {}
     files = [f for f in d.iterdir() if f.is_file() and f.suffix.lower() in (".docx", ".md", ".txt", ".pdf")
+             and "readme" not in f.name.lower() and not f.name.startswith(("~", "."))
              and _file_date(f) < before]
     if not files:
         return {}
