@@ -1570,8 +1570,17 @@ def serve_dashboard(state: InboxState, token: str):
                 action_ids = body.get("action_ids", [])
                 try:
                     if action_ids:
+                        titles = [a.get("title", "") for a in state.data.get("open_actions", [])
+                                  if a.get("id") in set(action_ids)]
                         state.mark_resolved(action_ids)
                         print(f"     ✓  Resolved {len(action_ids)} prior action(s)")
+                        try:
+                            from core.todo import complete_matching
+                            n = complete_matching(_fresh_token(), titles)
+                            if n:
+                                print(f"     ✓  Ticked off {n} matching task(s) in To Do")
+                        except Exception as e:
+                            print(f"     ⚠️  Could not update To Do ({e})")
                     resp = {"ok": True, "resolved": len(action_ids)}
                 except Exception as e:
                     resp = {"ok": False, "error": str(e)}
@@ -1748,6 +1757,7 @@ def _run_pipeline(args, open_dashboard: bool):
 
     state = InboxState()
     ck    = CompanyKnowledge()
+    _sync_from_todo(state, token)
     state_context   = state.build_context_block()
     knowledge_block = ck.build_prompt_block()               # loaded once (P4)
     briefing_text   = load_context_briefing()
@@ -1785,6 +1795,17 @@ def _run_pipeline(args, open_dashboard: bool):
         serve_dashboard(state, token)
 
 
+def _sync_from_todo(state, token):
+    """Actions you have already ticked off in To Do (any list) are resolved here too."""
+    try:
+        from core.todo import sync_completed
+        n = sync_completed(state, token)
+        if n:
+            print(f"  ✓  {n} prior action(s) resolved - completed in To Do")
+    except Exception as e:
+        print(f"  ⚠️  Could not check To Do for completed actions ({e})")
+
+
 def cmd_run(args):
     print("\n" + "=" * 60)
     print("  INBOX ACTION EXTRACTOR")
@@ -1816,6 +1837,7 @@ def cmd_review(args):
             data = json.load(f)
         token = graph.get_access_token()
         state = InboxState()
+        _sync_from_todo(state, token)
         save_dashboard_html(data, state)     # regenerate with current state
         serve_dashboard(state, token)
     except RuntimeError as e:

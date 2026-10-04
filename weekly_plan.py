@@ -211,27 +211,9 @@ def _pages(token, url, params=None, headers=None, cap=1000):
 
 
 def fetch_tasks(token) -> list:
-    lists = _pages(token, "/me/todo/lists")
-    target = next((l for l in lists if l.get("displayName", "").strip().lower()
-                   == TASK_LIST.lower()), None) \
-        or next((l for l in lists if l.get("wellknownListName") == "defaultList"), None)
-    if not target:
-        return []
-    raw = _pages(token, f"/me/todo/lists/{target['id']}/tasks", params={"$top": "100"})
-    tasks = []
-    for t in raw:
-        tasks.append({
-            "id":        t.get("id"),
-            "title":     (t.get("title") or "").strip(),
-            "status":    t.get("status"),
-            "importance": t.get("importance"),
-            "created":   (t.get("createdDateTime") or "")[:10],
-            "modified":  (t.get("lastModifiedDateTime") or "")[:10],
-            "completed": ((t.get("completedDateTime") or {}).get("dateTime") or "")[:10],
-            "due":       ((t.get("dueDateTime") or {}).get("dateTime") or "")[:10],
-            "note":      ((t.get("body") or {}).get("content") or "")[:300],
-        })
-    return tasks
+    """Every To Do list (not just Daily Priorities): open tasks plus those completed recently."""
+    from core.todo import fetch_all_tasks
+    return fetch_all_tasks(token, completed_days=14)
 
 
 def fetch_calendar(token, start: datetime.datetime, end: datetime.datetime) -> list:
@@ -353,8 +335,10 @@ ACTIVE MATTERS (current knowledge):
 INBOX TOPICS UPDATED THIS WEEK (from the MD's inbox review tool):
 {json.dumps(topics, ensure_ascii=False)[:15000]}
 
-OPEN TASKS IN THE MD'S TO DO LIST:
-{json.dumps([t["title"] for t in a["open"]][:120], ensure_ascii=False)}
+THE MD'S TO DO LIST (all lists) - his own record of what he is doing. Tasks he added directly
+often have no email trail, so treat them as evidence too:
+OPEN: {json.dumps([(t.get("list", ""), t["title"], t.get("due", "")) for t in a["open"]][:150], ensure_ascii=False)}
+COMPLETED THIS WEEK: {json.dumps([(t.get("list", ""), t["title"], t.get("completed", "")) for t in a["done"]][:80], ensure_ascii=False)}
 
 THIS WEEK'S EMAIL:
 {email_ctx}
@@ -364,7 +348,9 @@ YOUR TASK
    name exactly where it matches. Add genuinely new board-level matters. Mark matters
    clearly finished as closed. Leave untouched matters out.
 2. Give each updated matter a concrete next_step (who does what) and next_step_due
-   (YYYY-MM-DD) when the evidence gives one.
+   (YYYY-MM-DD) when the evidence gives one. Use the To Do list: a completed task that
+   belongs to a matter is progress on it (reflect it in the description); an open task
+   that belongs to a matter is usually its next step (use its due date).
 3. List dated obligations you can see: statutory, tenure, lodgement, contract, board,
    hearing or payment dates. Only real dates stated in the evidence.
 4. List anything you are unsure about as a short question for the MD to confirm.
