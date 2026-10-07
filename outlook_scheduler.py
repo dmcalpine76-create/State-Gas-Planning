@@ -652,18 +652,18 @@ def schedule_with_retry(
     verbose: bool = False,
 ) -> tuple[list[dict], list[dict]]:
     """
-    Place tasks in three passes, never booking beyond the coming week:
+    Place tasks in three passes, never booking beyond Friday of the current week:
 
       1. Due date first — each task is offered only the free slots on its
          To Do due date (overdue tasks: today), when that date falls inside
          the scheduling window.
       2. Best fit in the window — anything not placed by pass 1 (including
          tasks with no due date, or a due date beyond the window) is placed
-         wherever it fits best within the next `global.schedule_window_days`
-         days (default 7).
+         wherever it fits best between today and Friday of the current week.
+         Run on a Saturday or Sunday, the window is the coming Monday–Friday.
       3. Weekend holding slots — whatever is still left is parked on the
-         coming Saturday and Sunday as "to reallocate" blocks, for Doug to
-         drag into next week by hand.
+         Saturday and Sunday straight after that Friday as "to reallocate"
+         blocks, for Doug to drag into next week by hand.
 
     `initial_days` / `max_days` are accepted for compatibility but no longer
     widen the search. Returns (scheduled, unscheduled); unscheduled is only
@@ -672,9 +672,13 @@ def schedule_with_retry(
     scheduler_fn = scheduler_fn or ai_schedule_tasks
     g          = rules.get("global", {})
     min_block  = g.get("min_block", 30)
-    window     = int(g.get("schedule_window_days", 7))
     today      = datetime.datetime.now(AEST_OFFSET).date()
-    last_day   = today + datetime.timedelta(days=window - 1)
+    if today.weekday() <= 4:                       # Mon–Fri: through this Friday
+        first_day = today
+    else:                                          # weekend: plan next Mon–Fri
+        first_day = today + datetime.timedelta(days=7 - today.weekday())
+    last_day   = first_day + datetime.timedelta(days=4 - first_day.weekday())
+    window     = (last_day - today).days + 1
     remaining  = list(tasks)
     scheduled  = []
     booked     = []
@@ -692,7 +696,8 @@ def schedule_with_retry(
         placed = {n["task"]["id"] for n in newly}
         remaining = [t for t in remaining if t["id"] not in placed]
 
-    all_slots = find_free_slots(events, rules, days_ahead=window)
+    all_slots = [s for s in find_free_slots(events, rules, days_ahead=window)
+                 if s["date"] >= first_day.isoformat()]
 
     # Pass 1 — on the due date
     by_date = {}
@@ -704,7 +709,7 @@ def schedule_with_retry(
             d = datetime.date.fromisoformat(due)
         except ValueError:
             continue
-        d = max(d, today)                       # overdue → today
+        d = max(d, first_day)                   # overdue → first working day
         if d <= last_day:
             by_date.setdefault(d.isoformat(), []).append(t)
     for day in sorted(by_date):
@@ -721,7 +726,8 @@ def schedule_with_retry(
     # Pass 3 — park the rest on the weekend
     unscheduled = []
     if remaining:
-        parked, unscheduled = _park_on_weekend(remaining, events, booked, rules)
+        parked, unscheduled = _park_on_weekend(remaining, events, booked, rules,
+                                               after=last_day)
         scheduled.extend(parked)
         if verbose:
             print(f"   ↳ {len(parked)} parked on the weekend to reallocate")
@@ -730,9 +736,10 @@ def schedule_with_retry(
 
 
 def _park_on_weekend(tasks: list[dict], events: list[dict], booked: list[tuple],
-                     rules: dict) -> tuple[list[dict], list[dict]]:
+                     rules: dict, after: datetime.date = None) -> tuple[list[dict], list[dict]]:
     """
-    Put tasks the week couldn't fit onto the coming Saturday and Sunday,
+    Put tasks the week couldn't fit onto the Saturday and Sunday after `after`
+    (the Friday the scheduling window ends on),
     back to back from 09:00, avoiding anything already in the diary. They're
     holding slots, not commitments: marked free and titled to be reallocated.
     """
@@ -742,10 +749,9 @@ def _park_on_weekend(tasks: list[dict], events: list[dict], booked: list[tuple],
     end_t      = g.get("weekend_hold_end", "17:00")
     now        = datetime.datetime.now(AEST_OFFSET)
     today      = now.date()
-    sat        = today + datetime.timedelta(days=(5 - today.weekday()) % 7)
+    after      = after or today
+    sat        = after + datetime.timedelta(days=(5 - after.weekday()) % 7 or 7)
     days       = [d for d in (sat, sat + datetime.timedelta(days=1)) if d >= today]
-    if today.weekday() == 6:                      # run on a Sunday → today only
-        days = [today]
 
     busy = [(e["start_dt"], e["end_dt"]) for e in events] + list(booked)
     parked, left = [], []
@@ -767,7 +773,7 @@ def _park_on_weekend(tasks: list[dict], events: list[dict], booked: list[tuple],
             if end > day_end:
                 break
             body = (_build_event_body(t, cal_blocks)
-                    + "\n\nCould not be fitted into the coming week — move this to a "
+                    + "\n\nCould not be fitted into this week — move this to a "
                       "time next week.")
             parked.append({
                 "task":           t,
