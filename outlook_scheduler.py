@@ -46,6 +46,74 @@ PLAN_FILE    = SCHEDULING_PLAN_FILE
 GRAPH_BASE   = graph.GRAPH_BASE
 AEST_OFFSET  = datetime.timezone(datetime.timedelta(hours=AEST_OFFSET_HOURS))
 BLOCK_TAG    = "🎯"          # used to identify scheduler-created events
+
+BLOCK_CATEGORY = "Scheduled Task"  # every scheduler-created event carries this
+
+# Icon in front of a diary block, chosen from the task's title and notes.
+# First match wins, so the more specific groups come first. Override or extend
+# with "calendar_blocks": {"icons": [{"icon": "⚖️", "keywords": ["court"]}]}
+# in scheduling_rules.json — those are checked before the defaults.
+DEFAULT_BLOCK_ICONS = [
+    ("⚖️", ["litigation", "court", "lawyer", "legal", "counsel", "hopgood", " h&g", "h & g",
+            "mcdonald", "wildhorse", "affidavit", "mediation", "expert report", "insurer",
+            "claim", "subpoena"]),
+    ("🏛️", ["board", "director", "minutes", "chair", "agm", "annual report", "governance",
+            "audit", "remuneration", "constitution"]),
+    ("📋", ["asx", "quarterly", "appendix 5b", "5b", "disclosure", "accc", "compliance",
+            "lodge", "lodgement", "relinquish", "tenure", "permit", "atp ", "pl application",
+            "renewal", "department", "regulator", "ato", "tax", "r&d", "r & d", "royalt"]),
+    ("💰", ["capital", "raise", "raising", "funding", "investor", "broker", "alpine",
+            "saffron", "fensom", "ignite", "convertible", "cash flow", "cashflow",
+            "budget", "invoice", "payment", "loan", "equity", "placement", "bank"]),
+    ("🔥", ["hdng", "leip", "treasury", "jellinbah", "foundation customer", "x-cell",
+            "cradle", "rapid refuel", "truck", "diesel", "mes ", "conversion kit",
+            "cylinder", "hot tap", "qpm", "blue energy"]),
+    ("⛽", ["rolleston", "concept study", "pre-feed", "feed", "jemena", "qgp", "pipeline",
+            "reserve", "nsai", "farm-in", "farm in", "farmout", "farm-out", "beach",
+            "senex", "elementa", "santos", "glng", "reid's dome", "pl231", "wells", "drilling"]),
+    ("📞", ["call ", "call with", "phone", "meeting", "meet ", "catch up", "catch-up",
+            "coffee", "visit", "workshop", "session"]),
+    ("✉️", ["reply", "respond", "email", "send ", "follow up", "follow-up", "chase"]),
+]
+import re
+_KNOWN_ICONS = {BLOCK_TAG} | {i for i, _ in DEFAULT_BLOCK_ICONS}
+
+
+def block_icon(title: str, body: str = "", cal_blocks: dict | None = None) -> str:
+    """Pick the icon for a diary block; falls back to the configured prefix (🎯)."""
+    cal_blocks = cal_blocks or {}
+    text = f"{title} {body}".lower()
+    groups = [(g.get("icon", ""), g.get("keywords", []))
+              for g in cal_blocks.get("icons", []) if g.get("icon")]
+    for icon, words in groups + DEFAULT_BLOCK_ICONS:
+        for w in words:
+            w = w.strip().lower()
+            if w and re.search(r"(?<![a-z0-9])" + re.escape(w) + r"(?![a-z0-9])", text):
+                return icon
+    return (cal_blocks.get("block_prefix", BLOCK_TAG + " ").strip() or BLOCK_TAG)
+
+
+def block_title(title: str, body: str = "", cal_blocks: dict | None = None) -> str:
+    """Event subject for a diary block: '<icon> <task title>'."""
+    title = strip_block_icon(title)
+    return f"{block_icon(title, body, cal_blocks)} {title}"
+
+
+def strip_block_icon(subject: str) -> str:
+    """Remove a leading block icon (any of the known ones, or a custom one)."""
+    s = (subject or "").strip()
+    for icon in sorted(_KNOWN_ICONS, key=len, reverse=True):
+        if s.startswith(icon):
+            return s[len(icon):].lstrip("\ufe0f ").strip()
+    return s
+
+
+def is_block_event(subject: str, categories=None) -> bool:
+    """True for events this scheduler created (category, or a known icon prefix)."""
+    if BLOCK_CATEGORY in (categories or []):
+        return True
+    s = (subject or "").strip()
+    return any(s.startswith(i) for i in _KNOWN_ICONS)
 REQUEST_TIMEOUT = graph.REQUEST_TIMEOUT
 DAYFMT       = "%#d" if os.name == "nt" else "%-d"   # no-pad day: Windows vs Linux
 
@@ -251,7 +319,7 @@ def fetch_upcoming_events(token: str, days: int = 7) -> list[dict]:
             params={
                 "startDateTime": start_utc,
                 "endDateTime":   end_utc,
-                "$select": "subject,start,end,isAllDay,isCancelled,showAs,body",
+                "$select": "subject,start,end,isAllDay,isCancelled,showAs,body,categories",
                 "$orderby": "start/dateTime",
                 "$top": 200,
             },
@@ -293,7 +361,7 @@ def fetch_upcoming_events(token: str, days: int = 7) -> list[dict]:
             continue
 
         subject = ev.get("subject", "")
-        is_scheduler = subject.startswith(BLOCK_TAG)
+        is_scheduler = is_block_event(subject, ev.get("categories"))
 
         events.append({
             "subject":          subject,
@@ -471,7 +539,7 @@ def _log_scheduled_duration(title: str, mins: int) -> None:
     entries = _load_duration_history()
     entries.append({
         "date":    datetime.date.today().isoformat(),
-        "title":   title.replace(BLOCK_TAG, "").strip()[:80],
+        "title":   strip_block_icon(title)[:80],
         "mins":    int(mins),
         "outcome": "scheduled",
     })
@@ -487,7 +555,7 @@ def _record_flagged_outcomes(flagged: list[dict]) -> None:
         return
     changed = False
     for ev in flagged:
-        title = ev["subject"].replace(BLOCK_TAG, "").strip()[:80]
+        title = strip_block_icon(ev["subject"])[:80]
         for entry in reversed(entries):
             if entry["title"] == title and entry.get("outcome") == "scheduled":
                 entry["outcome"] = "unfinished"
@@ -758,7 +826,7 @@ Respond ONLY as JSON — no markdown, no preamble:
                 "estimated_mins": est,
                 "start_dt":       slot["start_dt"],
                 "end_dt":         end_dt,
-                "title":          f"{prefix}{task['title']}",
+                "title":          block_title(task['title'], task.get("body", ""), cal_blocks),
                 "description":    _build_event_body(task, cal_blocks),
                 "reason":         item.get("reason", ""),
             })
@@ -819,7 +887,7 @@ def create_calendar_events(token: str, scheduled: list[dict], rules: dict) -> tu
                 "showAs": show_as,
                 "isReminderOn": reminder > 0,
                 "reminderMinutesBeforeStart": reminder,
-                "categories": ["Scheduled Task"],
+                "categories": [BLOCK_CATEGORY],
             }
 
             _graph_post(token, "/me/events", body)
@@ -903,7 +971,7 @@ def build_schedule_summary_html(
     if flagged:
         rows = ""
         for ev in flagged:
-            rows += f'<div style="padding:0.45rem 1rem;border-bottom:1px solid var(--rule);font-size:0.8rem;display:flex;gap:0.5rem"><span style="color:#d35400">⚑</span><span>{ev["subject"].replace("🎯 ","")}</span><span style="margin-left:auto;font-size:0.7rem;color:var(--ink-light)">{ev["start_dt"].strftime("%H:%M")}</span></div>'
+            rows += f'<div style="padding:0.45rem 1rem;border-bottom:1px solid var(--rule);font-size:0.8rem;display:flex;gap:0.5rem"><span style="color:#d35400">⚑</span><span>{strip_block_icon(ev["subject"])}</span><span style="margin-left:auto;font-size:0.7rem;color:var(--ink-light)">{ev["start_dt"].strftime("%H:%M")}</span></div>'
         html_parts.append(f"""<div style="margin-bottom:0.75rem">
 <div style="font-size:0.65rem;font-weight:800;letter-spacing:0.1em;text-transform:uppercase;padding:0.5rem 1rem;background:#fef3e2;border-bottom:1px solid #f5cba7;color:#d35400">⚑ Yesterday's blocks — review and reschedule if needed</div>
 {rows}</div>""")
@@ -1209,7 +1277,7 @@ Respond ONLY as JSON:
                 "estimated_mins": est,
                 "start_dt":       slot["start_dt"],
                 "end_dt":         end_dt,
-                "title":          f"{prefix}{task['title']}",
+                "title":          block_title(task['title'], task.get("body", ""), cal_blocks),
                 "description":    _build_event_body(task, cal_blocks),
                 "reason":         item.get("reason", ""),
             })
@@ -1336,14 +1404,14 @@ def serve_dashboard(api_key: str = None) -> None:
             end_utc   = dt_end.astimezone(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 
             body = {
-                "subject": f"{prefix}{title}",
+                "subject": block_title(title, body_text, cal_blocks),
                 "body": {"contentType": "text", "content": description},
                 "start": {"dateTime": start_utc, "timeZone": "UTC"},
                 "end":   {"dateTime": end_utc,   "timeZone": "UTC"},
                 "showAs": show_as,
                 "isReminderOn": reminder > 0,
                 "reminderMinutesBeforeStart": reminder,
-                "categories": ["Scheduled Task"],
+                "categories": [BLOCK_CATEGORY],
             }
             # Fresh token per push (A6) — MSAL silent-refreshes, so a
             # dashboard left open for hours keeps working.
@@ -1498,7 +1566,7 @@ def serve_dashboard(api_key: str = None) -> None:
                         dur = max(30, int((ev["end_dt"] - ev["start_dt"]).total_seconds() / 60))
                         carry_tasks.append({
                             "id":         f"carry_{i}",
-                            "title":      ev["subject"].replace(BLOCK_TAG, "").strip(),
+                            "title":      strip_block_icon(ev["subject"]),
                             "body":       "Carried forward — yesterday's block was not completed.",
                             "due_date":   today_iso,
                             "priority":   "high",

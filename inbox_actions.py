@@ -1464,7 +1464,7 @@ def create_blocks(blocks: list) -> dict:
                 "start_dt":       start,
                 "end_dt":         start + datetime.timedelta(minutes=mins),
                 "estimated_mins": mins,
-                "title":          f"{cal_blocks.get('block_prefix', '🎯 ')}{task['title']}",
+                "title":          scheduler.block_title(task["title"], task.get("body", ""), cal_blocks),
                 "description":    scheduler._build_event_body(task, cal_blocks),
             }
             ok, fail = scheduler.create_calendar_events(token, [item], rules)
