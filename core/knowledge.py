@@ -444,9 +444,16 @@ class InboxState:
         "key_people":     {},
         "open_actions":   [],
         "closed_actions": [],
+        # Source emails already dealt with - pushed, resolved, dismissed or
+        # found in To Do - keyed by Graph message id. An email in here is
+        # never offered as a new action again while it is still inside the
+        # lookback window.
+        "handled":        {},
     }
 
-    CLOSED_RETENTION_DAYS = 14
+    CLOSED_RETENTION_DAYS  = 14
+    HANDLED_RETENTION_DAYS = 60    # comfortably longer than any lookback
+    CARRY_EXPIRY_DAYS      = 21    # normal/low carried items close after this
     TOPIC_DORMANT_DAYS    = 45
     TOPIC_PRUNE_DAYS      = 90
     MAX_STATE_CHARS       = 8000
@@ -471,6 +478,10 @@ class InboxState:
             a for a in self.data.get("closed_actions", [])
             if _days_since(a.get("closed_date", "")) <= self.CLOSED_RETENTION_DAYS
         ]
+        self.data["handled"] = {
+            k: v for k, v in self.data.get("handled", {}).items()
+            if _days_since(v.get("date", "")) <= self.HANDLED_RETENTION_DAYS
+        }
 
     # ── CONTEXT BLOCK ──────────────────────────────────────────────────────
 
@@ -493,7 +504,7 @@ class InboxState:
         ]
 
         open_sorted = sorted(
-            [a for a in open_act if a.get("status") in ("open", "pushed_to_todo")],
+            [a for a in open_act if a.get("status") == "open"],
             key=lambda a: (0 if a.get("priority") == "high" else 1,
                            a.get("raised_date", "9999")))
         if open_sorted:
@@ -551,28 +562,139 @@ class InboxState:
 
     # ── ACTION STATE TRANSITIONS ───────────────────────────────────────────
 
-    def mark_pushed(self, action_titles: list):
-        """Mark open actions as pushed_to_todo after a successful push (B1)."""
-        title_set = {t.lower() for t in action_titles}
+    # ── HANDLED SOURCES ────────────────────────────────────────────────────
+
+    def handled_sources(self) -> set:
+        return set(self.data.get("handled", {}).keys())
+
+    def record_handled(self, msg_id: str, how: str, title: str = ""):
+        if not msg_id:
+            return
+        self.data.setdefault("handled", {})[msg_id] = {
+            "how": how, "date": _today(), "title": (title or "")[:120]}
+
+    def _close(self, a: dict, status: str, closed: list):
+        a["closed_date"] = _today()
+        a["status"]      = status
+        closed.append(a)
+        if a.get("msg_id"):
+            self.record_handled(a["msg_id"], status, a.get("title", ""))
+
+    def _close_where(self, pred, status: str) -> int:
+        closed, still_open = [], []
         for a in self.data.get("open_actions", []):
-            if a.get("title", "").lower() in title_set:
-                a["status"] = "pushed_to_todo"
+            (self._close(a, status, closed) if pred(a) else still_open.append(a))
+        self.data["open_actions"] = still_open
+        self.data.setdefault("closed_actions", []).extend(closed)
+        return len(closed)
+
+    def mark_pushed(self, action_titles: list, msg_ids: list = None):
+        """
+        A pushed action now lives in To Do, which is where it gets done. It
+        leaves the carried-forward list rather than sitting there as "In To
+        Do" indefinitely, and its source email is recorded so it is not
+        offered again. Matched on the source email; title only as a fallback,
+        because the title stored here and the one on the card were written
+        separately and drift.
+        """
+        ids    = {m for m in (msg_ids or []) if m}
+        titles = {(t or "").strip().lower() for t in (action_titles or []) if t}
+        for m, t in zip(msg_ids or [], action_titles or []):
+            self.record_handled(m, "pushed", t)
+        self._close_where(
+            lambda a: (a.get("msg_id") and a["msg_id"] in ids)
+                      or (a.get("title", "").strip().lower() in titles),
+            "pushed")
         self.save()
 
     def mark_resolved(self, action_ids: list):
-        """Move actions from open to closed by id."""
-        today      = _today()
-        id_set     = set(action_ids)
-        still_open = []
-        for a in self.data.get("open_actions", []):
-            if a.get("id") in id_set:
-                a["closed_date"] = today
-                a["status"]      = "resolved"
-                self.data.setdefault("closed_actions", []).append(a)
-            else:
-                still_open.append(a)
-        self.data["open_actions"] = still_open
+        """Close carried-forward actions by id, and remember their source."""
+        id_set = set(action_ids or [])
+        n = self._close_where(lambda a: a.get("id") in id_set, "resolved")
         self.save()
+        return n
+
+    def mark_dismissed(self, items: list):
+        """
+        Dismiss from the new-actions list: the source email is remembered so
+        the action is not extracted again, and any open copy is closed.
+        items: [{"msg_id": "...", "title": "..."}]
+        """
+        ids, titles = set(), set()
+        for it in items or []:
+            m, t = it.get("msg_id", ""), it.get("title", "")
+            if m:
+                ids.add(m)
+                self.record_handled(m, "dismissed", t)
+            elif t:
+                titles.add(t.strip().lower())
+        self._close_where(
+            lambda a: (a.get("msg_id") and a["msg_id"] in ids)
+                      or (a.get("title", "").strip().lower() in titles),
+            "dismissed")
+        self.save()
+
+    def sync_with_todo(self, todo_sources: set) -> int:
+        """
+        Close anything already captured in To Do - pushed from the morning
+        briefing, from an earlier run, or by hand with the [src:] marker -
+        plus the legacy "pushed_to_todo" items that predate this.
+        """
+        todo_sources = set(todo_sources or ())
+        for m in todo_sources:
+            if m not in self.data.get("handled", {}):
+                self.record_handled(m, "in_todo")
+        return self._close_where(
+            lambda a: a.get("status") == "pushed_to_todo"
+                      or (a.get("msg_id") and a["msg_id"] in todo_sources),
+            "in_todo")
+
+    def expire_stale(self, days: int = None) -> int:
+        """
+        Close carried-forward items nobody has touched in `days`. High
+        priority items never expire - those stay until resolved.
+        """
+        days = self.CARRY_EXPIRY_DAYS if days is None else days
+        return self._close_where(
+            lambda a: a.get("status") == "open"
+                      and a.get("priority") != "high"
+                      and _days_since(a.get("raised_date", _today())) > days,
+            "expired")
+
+    def add_new_actions(self, actions: list) -> list:
+        """
+        Record this run's actions as open, deterministically. This used to be
+        left to the model ("every action NOT already in open_actions, match by
+        title similarity"), which is how reworded duplicates and lost source
+        links crept in. Dedupe is by source email, title as a fallback.
+        """
+        open_ = self.data.setdefault("open_actions", [])
+        have_ids    = {a.get("msg_id") for a in open_ if a.get("msg_id")}
+        have_titles = {(a.get("title") or "").strip().lower() for a in open_}
+        nums = [int(x.get("id", "act-0").split("-")[-1])
+                for x in open_ + self.data.get("closed_actions", [])
+                if str(x.get("id", "")).split("-")[-1].isdigit()]
+        nxt = max(nums or [0]) + 1
+        added = []
+        for a in actions or []:
+            m = a.get("msg_id", "")
+            t = (a.get("title") or "").strip()
+            if (m and m in have_ids) or (not m and t.lower() in have_titles):
+                continue
+            rec = {"id": f"act-{nxt:03d}", "title": t,
+                   "topic": a.get("topic", ""), "detail": a.get("detail", ""),
+                   "from_name": a.get("from_name", ""), "raised_date": _today(),
+                   "suggested_due": a.get("suggested_due", ""),
+                   "priority": a.get("priority", "normal"), "status": "open",
+                   "msg_id": m, "web_link": a.get("web_link", ""),
+                   "email_subject": a.get("email_subject", "")}
+            open_.append(rec)
+            added.append(rec)
+            nxt += 1
+            if m:
+                have_ids.add(m)
+            have_titles.add(t.lower())
+        return added
 
     def apply_patch(self, patch: dict):
         """Apply the state portion of the post-run patch."""
@@ -587,16 +709,15 @@ class InboxState:
                 a["closed_date"] = today
                 a["status"]      = "resolved"
                 newly_closed.append(a)
+                if a.get("msg_id"):
+                    self.record_handled(a["msg_id"], "resolved", a.get("title", ""))
             else:
                 still_open.append(a)
         self.data["open_actions"]   = still_open
         self.data["closed_actions"] = self.data.get("closed_actions", []) + newly_closed
 
-        existing_ids = {a.get("id") for a in self.data["open_actions"]}
-        for a in patch.get("new_open_actions", []):
-            if a.get("id") not in existing_ids:
-                self.data["open_actions"].append(a)
-                existing_ids.add(a.get("id"))
+        # new_open_actions is ignored: add_new_actions() records them
+        # deterministically, with their source email, before this runs.
 
         for t in patch.get("topic_updates", []):
             name = t.get("topic", "")

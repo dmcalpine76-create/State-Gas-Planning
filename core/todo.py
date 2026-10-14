@@ -61,6 +61,10 @@ def fetch_all_tasks(token, completed_days: int = 14, per_list_cap: int = 500) ->
                     "completed":  done,
                     "due":        ((t.get("dueDateTime") or {}).get("dateTime") or "")[:10],
                     "note":       ((t.get("body") or {}).get("content") or "")[:300],
+                    # source-email ids, read from the WHOLE body - the [src:...]
+                    # marker is written last, past where "note" is cut off
+                    "src_ids":    re.findall(r"\[src:([^\]]{4,})\]",
+                                             (t.get("body") or {}).get("content") or ""),
                 })
             url = d.get("@odata.nextLink")
     return tasks
