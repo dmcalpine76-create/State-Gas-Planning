@@ -13,13 +13,16 @@ on:
       only:
         description: "What to run"
         type: choice
-        options: [all, board, plan, pack, brief]
+        options: [all, board, plan, pack, brief, qbrief, quarterly]
         default: all
       prior:
         description: "Board pack: previous deck to roll forward from (optional, e.g. 2026-08-06)"
         default: ""
       meeting:
         description: "Board pack: meeting date YYYY-MM-DD (optional)"
+        default: ""
+      period:
+        description: "Quarterly: quarter end YYYY-MM (optional, default the quarter just ended)"
         default: ""
 
 permissions:
@@ -66,7 +69,7 @@ jobs:
           BRIEFING_EMAIL_TO:  ${{ secrets.BRIEFING_EMAIL_TO }}
           GH_SECRETS_TOKEN:   ${{ secrets.GH_SECRETS_TOKEN }}
           WEEKLY_TOKEN_CACHE_ORIG: ${{ secrets.WEEKLY_TOKEN_CACHE }}
-        run: python weekly_plan.py run --days "${{ inputs.days || '7' }}" --only "${{ inputs.only || 'all' }}" --prior "${{ inputs.prior }}" --meeting "${{ inputs.meeting }}"
+        run: python weekly_plan.py run --days "${{ inputs.days || '7' }}" --only "${{ inputs.only || 'all' }}" --prior "${{ inputs.prior }}" --meeting "${{ inputs.meeting }}" --period "${{ inputs.period }}"
 
       # The page is encrypted; its key is only in the email link.
       - name: Publish the encrypted page

@@ -609,6 +609,22 @@ def cmd_run(args):
         for n in remote.list("board/drafts"):
             if n.endswith(".json") and n[:10] >= cutoff:
                 remote.pull(f"board/drafts/{n}")
+        if args.only in ("qbrief", "quarterly"):
+            for sub in ("reports/published", "reports/templates", "reports/strategy",
+                        "reports/briefs", "board/minutes", "board/sent"):
+                for n in remote.list(sub):
+                    remote.pull(f"{sub}/{n}")
+            import quarterly_report as _qr
+            per = args.period or _qr.default_period(today)
+            for n in remote.list("reports/drafts"):
+                if n.startswith(per) and n.endswith(".docx"):
+                    remote.pull(f"reports/drafts/{n}")
+            remote.pull("reports/quarterly_guidance.md")
+            remote.pull("board/notes_for_next_meeting.md")
+            decks = sorted(n for n in remote.list("board/packs")
+                           if n.endswith(".pptx") or n.endswith(".deck.json"))
+            for n in decks[-3:]:
+                remote.pull(f"board/packs/{n}")
         if args.only in ("pack", "brief"):
             for n in remote.list("board/briefs"):
                 remote.pull(f"board/briefs/{n}")
@@ -652,6 +668,8 @@ def cmd_run(args):
 
     if args.only in ("pack", "brief"):
         return run_pack(args, token, store, remote, today)
+    if args.only in ("qbrief", "quarterly"):
+        return run_quarterly(args, token, store, remote, today)
 
     # 1. read the week
     with quiet():
@@ -832,12 +850,74 @@ def run_pack(args, token, store, remote, today):
     say("Done (board pack)")
 
 
+def run_quarterly(args, token, store, remote, today):
+    """Quarterly activities report: brief (questions for the MD) or the draft + verification."""
+    import quarterly_report as qr
+    from core import graph
+    from core.llm import get_client
+    period = args.period or qr.default_period(today)
+    start, _ = qr.bounds(period)
+    days = args.days if args.days != 7 else (today - start).days + 1
+    with quiet():
+        emails = graph.run_scan(token, days, max_per_folder=75, max_total=500,
+                                body_chars=1200, label="QUARTERLY")
+    say(f"Read {len(emails)} emails for the quarter ended {period}")
+    model = os.environ.get("BOARD_PACK_MODEL") or None
+    with quiet():
+        if args.only == "qbrief":
+            out = qr.make_brief(get_client(), store, emails, period, model)
+            files = [out["json"], out["md"]]
+        else:
+            out = qr.make_report(get_client(), store, emails, period, model, say=lambda m: None)
+            files = [out["docx"], out["verification"], out["spec"]]
+    say("Quarterly brief prepared" if args.only == "qbrief" else "Quarterly report drafted")
+    if remote:
+        for f in files:
+            remote.push(Path(f).relative_to(store).as_posix(), force_new=True)
+        say("Saved to the knowledge folder: reports/" + ("briefs" if args.only == "qbrief" else "drafts"))
+    to_addr = os.environ.get("BRIEFING_EMAIL_TO", "").strip()
+    if to_addr:
+        try:
+            send_files(token, to_addr,
+                       f"Quarterly {'brief' if args.only == 'qbrief' else 'draft'} — quarter ended {period}",
+                       ("The brief for this quarter's activities report is attached. Open a Claude session "
+                        "and ask to go through the quarterly brief; your answers are saved as "
+                        f"reports/briefs/{period} answers.json, then run Quarterly report in the Control Room."
+                        if args.only == "qbrief" else
+                        "The draft quarterly activities report and its verification document are attached. "
+                        "Both are also in your state gas knowledge folder under reports/drafts."),
+                       [f for f in files if Path(f).suffix in (".docx", ".md")])
+            say("Email sent")
+        except Exception as ex:
+            say(f"!! Could not email the files ({type(ex).__name__})")
+    say("Done (quarterly)")
+
+
+def send_files(token, to_addr, subject, text, files) -> None:
+    import base64
+    import requests
+    from html import escape as e
+    att = [{"@odata.type": "#microsoft.graph.fileAttachment", "name": Path(f).name,
+            "contentBytes": base64.b64encode(Path(f).read_bytes()).decode()} for f in files]
+    msg = {"message": {"subject": subject,
+                       "body": {"contentType": "HTML",
+                                "content": f'<div style="font-family:Aptos,Segoe UI,sans-serif;font-size:11pt">{e(text)}</div>'},
+                       "toRecipients": [{"emailAddress": {"address": to_addr}}],
+                       "attachments": att},
+           "saveToSentItems": False}
+    r = requests.post("https://graph.microsoft.com/v1.0/me/sendMail",
+                      headers={"Authorization": f"Bearer {token}"}, json=msg, timeout=120)
+    r.raise_for_status()
+
+
 def main():
     ap = argparse.ArgumentParser(description="Sunday weekly planning run")
     ap.add_argument("command", choices=["setup", "run"])
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--email", action="store_true")
-    ap.add_argument("--only", choices=["all", "board", "plan", "pack", "brief"], default="all")
+    ap.add_argument("--only", choices=["all", "board", "plan", "pack", "brief", "qbrief", "quarterly"],
+                    default="all")
+    ap.add_argument("--period", default="", help="quarterly: quarter end YYYY-MM (default: last quarter)")
     ap.add_argument("--prior", default="", help="board pack: roll forward from this deck (file name prefix)")
     ap.add_argument("--meeting", default="", help="board pack: meeting date YYYY-MM-DD")
     args = ap.parse_args()

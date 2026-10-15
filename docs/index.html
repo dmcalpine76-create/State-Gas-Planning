@@ -128,6 +128,14 @@ summary{cursor:pointer;font-weight:700;padding:12px 0}
           <button data-cloud="pack" data-days="days-board_briefing">Run</button>
         </div>
       </div>
+      <div class="row">
+        <div><h3>Quarterly activities report</h3><p>Two steps. <b>Brief</b> reviews the quarter and saves the questions only you can answer (reports/briefs) - go through them in a Claude session. <b>Draft</b> then writes the report in your Word format, following your latest strategy deck and your answers, plus a verification document showing the source of every statement. Both are saved to the knowledge folder under reports and emailed to you. Runs in the cloud, for the quarter just ended.</p>
+          <div class="meta" id="meta-quarterly"></div></div>
+        <div class="controls">
+          <button data-cloud="qbrief">Brief</button>
+          <button data-cloud="quarterly">Draft</button>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -162,6 +170,8 @@ summary{cursor:pointer;font-weight:700;padding:12px 0}
     briefing: { repo: "morning-briefing", wf: "generate.yml", inputs: { reason: "Control Room re-run" }, meta: "meta-briefing" },
     weekly:   { repo: "State-Gas-Planning", wf: "weekly_plan.yml", base: {}, meta: "meta-weekly" },
     pack:     { repo: "State-Gas-Planning", wf: "weekly_plan.yml", base: { only: "pack" }, meta: "meta-board_briefing" },
+    qbrief:   { repo: "State-Gas-Planning", wf: "weekly_plan.yml", base: { only: "qbrief" }, meta: "meta-quarterly" },
+    quarterly:{ repo: "State-Gas-Planning", wf: "weekly_plan.yml", base: { only: "quarterly" }, meta: "meta-quarterly" },
   };
   const LAUNCHER = "http://127.0.0.1:8790";
   const store = {
@@ -235,6 +245,8 @@ summary{cursor:pointer;font-weight:700;padding:12px 0}
       const d = Number($(daysId).value);
       if (!(Number.isInteger(d) && d >= 1 && d <= 60)) { toast("Days must be a whole number from 1 to 60."); return; }
       c.inputs = { ...(c.base || {}), days: String(d) };
+    } else if (c.base) {
+      c.inputs = { ...c.base };
     }
     if (!store.get("ghToken")) { $("settings").open = true; $("gh-token").focus(); toast("Add your GitHub key in Settings first."); return; }
     btn.disabled = true;
