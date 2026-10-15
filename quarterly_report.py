@@ -219,32 +219,27 @@ def _answers(ctx) -> str:
 
 
 def _call(client, prompt, max_tokens, label, model=None):
-    """Model call that raises with the reason (the error goes to the private log, not the public one)."""
-    from core.llm import api_call_with_retry, robust_json_parse
-    msg = api_call_with_retry(client, model=model or None, max_tokens=max_tokens,
-                              messages=[{"role": "user", "content": prompt}]) if model else \
-        api_call_with_retry(client, max_tokens=max_tokens, messages=[{"role": "user", "content": prompt}])
-    raw = "".join(getattr(c, "text", "") for c in msg.content).strip()
-    tries = [raw]
-    i, j = raw.find("{"), raw.rfind("}")
-    if 0 <= i < j:
-        tries.append(raw[i:j + 1])
-    for t in tries:
-        try:
-            out = json.loads(t)
-            if isinstance(out, dict):
-                return out
-        except ValueError:
-            pass
-        try:
-            out = robust_json_parse(t)
-            if isinstance(out, dict):
-                return out
-        except Exception:
-            pass
-    raise RuntimeError(f"{label}: could not read the model's answer "
-                       f"(stop_reason={getattr(msg, 'stop_reason', '?')}, {len(raw)} chars). "
-                       f"Starts: {raw[:300]!r} ... ends: {raw[-200:]!r}")
+    """
+    Model call that returns a dict. The answer comes back through a forced tool
+    call, so the API hands over well-formed JSON even when the text is full of
+    quotation marks. Raises with the reason (the error goes to the private log).
+    """
+    from core.llm import api_call_with_retry
+    kw = dict(max_tokens=max_tokens,
+              messages=[{"role": "user", "content": prompt + "\n\nGive your answer by calling the submit tool "
+                         "with the JSON object described above as its input."}],
+              tools=[{"name": "submit", "description": "Submit the answer as the JSON object described.",
+                      "input_schema": {"type": "object", "additionalProperties": True}}],
+              tool_choice={"type": "tool", "name": "submit"})
+    if model:
+        kw["model"] = model
+    msg = api_call_with_retry(client, **kw)
+    for c in msg.content:
+        if getattr(c, "type", "") == "tool_use" and isinstance(c.input, dict) and c.input:
+            return c.input
+    raw = "".join(getattr(c, "text", "") for c in msg.content)
+    raise RuntimeError(f"{label}: no answer from the model (stop_reason={getattr(msg, 'stop_reason', '?')}, "
+                       f"{len(raw)} chars of text)")
 
 
 # ── step 1: brief ──────────────────────────────────────────────────────────
@@ -346,8 +341,7 @@ continuous-disclosure appropriate.
 - related_parties / e_and_e: the two payment paragraphs, with [x] for amounts not supplied.
 - date_line: "[xx] {(end + datetime.timedelta(days=31)):%B %Y}" unless supplied.
 
-Respond with ONE JSON object only - no preamble, no code fences, no commentary after it. Use straight
-double quotes for JSON strings and curly quotes (’ “ ”) inside the text:
+Respond with JSON only:
 {{"date_line":"","title":"QUARTERLY ACTIVITIES REPORT – {ctx['quarter_end']}","highlights":["","",""],
  "intro":"","lead_paras":[""],"horizons":null,"after_table":"",
  "sections":[{{"heading":"","blocks":[{{"t":"p","text":""}}]}}],
