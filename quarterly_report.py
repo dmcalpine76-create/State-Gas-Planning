@@ -224,12 +224,27 @@ def _call(client, prompt, max_tokens, label, model=None):
     msg = api_call_with_retry(client, model=model or None, max_tokens=max_tokens,
                               messages=[{"role": "user", "content": prompt}]) if model else \
         api_call_with_retry(client, max_tokens=max_tokens, messages=[{"role": "user", "content": prompt}])
-    raw = msg.content[0].text.strip()
-    try:
-        return robust_json_parse(raw) or {}
-    except Exception:
-        raise RuntimeError(f"{label}: could not read the model's answer "
-                           f"(stop_reason={getattr(msg, 'stop_reason', '?')}, {len(raw)} chars)")
+    raw = "".join(getattr(c, "text", "") for c in msg.content).strip()
+    tries = [raw]
+    i, j = raw.find("{"), raw.rfind("}")
+    if 0 <= i < j:
+        tries.append(raw[i:j + 1])
+    for t in tries:
+        try:
+            out = json.loads(t)
+            if isinstance(out, dict):
+                return out
+        except ValueError:
+            pass
+        try:
+            out = robust_json_parse(t)
+            if isinstance(out, dict):
+                return out
+        except Exception:
+            pass
+    raise RuntimeError(f"{label}: could not read the model's answer "
+                       f"(stop_reason={getattr(msg, 'stop_reason', '?')}, {len(raw)} chars). "
+                       f"Starts: {raw[:300]!r} ... ends: {raw[-200:]!r}")
 
 
 # ── step 1: brief ──────────────────────────────────────────────────────────
@@ -331,7 +346,8 @@ continuous-disclosure appropriate.
 - related_parties / e_and_e: the two payment paragraphs, with [x] for amounts not supplied.
 - date_line: "[xx] {(end + datetime.timedelta(days=31)):%B %Y}" unless supplied.
 
-Respond with JSON only:
+Respond with ONE JSON object only - no preamble, no code fences, no commentary after it. Use straight
+double quotes for JSON strings and curly quotes (’ “ ”) inside the text:
 {{"date_line":"","title":"QUARTERLY ACTIVITIES REPORT – {ctx['quarter_end']}","highlights":["","",""],
  "intro":"","lead_paras":[""],"horizons":null,"after_table":"",
  "sections":[{{"heading":"","blocks":[{{"t":"p","text":""}}]}}],
