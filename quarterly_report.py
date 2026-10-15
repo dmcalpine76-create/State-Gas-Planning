@@ -77,6 +77,23 @@ def _text(f: Path, limit=None) -> str:
     return t[:limit] if limit else t
 
 
+def _narrative(t: str, limit: int) -> str:
+    """The narrative part of a report: up to the reserves tables / statutory text."""
+    m = re.search(r"\n\s*(Resource and Reserve Estimates|Reserves and Resources|Competent Person)", t)
+    return (t[:m.start()] if m and m.start() > 2000 else t)[:limit]
+
+
+def _section(t: str, start_pat: str, end_pat: str, limit: int) -> str:
+    """The longest stretch from a start heading to the next end heading (skips the contents page)."""
+    best = ""
+    for a in re.finditer(start_pat, t, re.I):
+        b = re.search(end_pat, t[a.end():], re.I)
+        part = t[a.start(): a.end() + (b.start() if b else limit)]
+        if len(part) > len(best):
+            best = part
+    return (best or t)[:limit]
+
+
 def _read(p: Path, empty):
     try:
         return json.loads(p.read_text(encoding="utf-8"))
@@ -107,10 +124,15 @@ def gather(store: Path, period: str, emails: list) -> dict:
     import quarterly_render as qr
     ctx = {"period": period, "quarter_end": _quarter_name(period),
            "start": start.isoformat(), "end": end.isoformat(),
-           "template": templates[-1], "template_text": qr.template_text(str(templates[-1]))[:30000]}
-    ctx["previous"] = [{"name": f.name, "text": _text(f, 20000)} for f in quarterlies[-2:]]
-    ctx["annual"] = ({"name": annuals[-1].name, "text": _text(annuals[-1], 25000)} if annuals else None)
-    ctx["deck"] = ({"name": decks[-1].name, "text": _text(decks[-1], 30000)} if decks else None)
+           "template": templates[-1],
+           "template_text": _narrative(qr.template_text(str(templates[-1])), 18000)}
+    older = [f for f in quarterlies if f.stem[:7] != templates[-1].stem[:7]]
+    ctx["previous"] = [{"name": f.name, "text": _narrative(_text(f), 9000)} for f in older[-1:]]
+    ctx["annual"] = ({"name": annuals[-1].name,
+                      "text": _section(_text(annuals[-1]), r"(Chairman.s letter|Review of operations)",
+                                       r"Directors.? report|Remuneration report|Corporate governance", 12000)}
+                     if annuals else None)
+    ctx["deck"] = ({"name": decks[-1].name, "text": _text(decks[-1], 14000)} if decks else None)
 
     # board material from the start of the quarter to today
     import board_sources as bs
@@ -119,29 +141,29 @@ def gather(store: Path, period: str, emails: list) -> dict:
     for f in (sorted(md.iterdir()) if md.exists() else []):
         if f.is_file() and f.suffix.lower() in (".docx", ".md", ".txt", ".pdf") \
                 and "readme" not in f.name.lower() and bs._file_date(f) >= start.isoformat():
-            mins.append({"name": f.name, "text": bs.doc_text(f)[:12000]})
-    ctx["minutes"] = mins[-3:]
+            mins.append({"name": f.name, "text": bs.doc_text(f)[:7000]})
+    ctx["minutes"] = mins[-2:]
     packs = []
     pd = store / "board" / "packs"
     for f in (sorted(pd.iterdir()) if pd.exists() else []):
         if f.is_file() and (f.suffix == ".pptx" or f.name.endswith(".deck.json")) and f.name[:10] >= start.isoformat():
             try:
                 if f.suffix == ".pptx":
-                    t = _text(f, 15000)
+                    t = _text(f, 9000)
                 else:
                     from deck_reader import deck_as_text
-                    t = deck_as_text(_read(f, []), 15000)
+                    t = deck_as_text(_read(f, []), 9000)
                 packs.append({"name": f.name, "text": t})
             except Exception:
                 pass
-    ctx["packs"] = packs[-3:]
+    ctx["packs"] = packs[-1:]
     sent = []
     for f in sorted((store / "board" / "sent").glob("*.txt")):
         if f.stem >= start.isoformat():
             t = f.read_text(encoding="utf-8", errors="ignore")
             if "teams.microsoft.com" not in t and len(t) > 300:
-                sent.append({"date": f.stem, "text": t[:5000]})
-    ctx["sent"] = sorted(sent, key=lambda x: x["date"], reverse=True)[:14]
+                sent.append({"date": f.stem, "text": t[:2200]})
+    ctx["sent"] = sorted(sent, key=lambda x: x["date"], reverse=True)[:8]
     matters = _read(store / "matters.json", {"matters": {}}).get("matters", {})
     keys = ("category", "description", "next_step", "next_step_due", "last_active")
     ctx["matters"] = {n: {k: m.get(k) for k in keys} for n, m in matters.items()
@@ -150,9 +172,9 @@ def gather(store: Path, period: str, emails: list) -> dict:
     ctx["notes"] = notes.read_text(encoding="utf-8")[:6000] if notes.exists() else ""
     g = store / R / "quarterly_guidance.md"
     ctx["guidance"] = g.read_text(encoding="utf-8")[:6000] if g.exists() else ""
-    ctx["earlier_drafts"] = [{"name": f.name, "text": _text(f, 20000)} for f in _files(store, "drafts", (".docx",))
+    ctx["earlier_drafts"] = [{"name": f.name, "text": _narrative(_text(f), 14000)} for f in _files(store, "drafts", (".docx",))
                              if f.name.startswith(period) and "verification" not in f.name.lower()][-1:]
-    ctx["email"] = build_email_context(emails)[:60000]
+    ctx["email"] = build_email_context(emails)[:22000]
     ctx["today"] = today.isoformat()
     return ctx
 
@@ -180,7 +202,7 @@ LAST QUARTERLY, AS THE WORD TEMPLATE ({ctx['template'].name}) - structure, tone 
     s += block("BOARD MINUTES IN THE PERIOD:", ctx["minutes"])
     s += block("BOARD PACKS IN THE PERIOD:", ctx["packs"])
     s += block("UPDATES SENT TO DIRECTORS (newest first):", ctx["sent"])
-    s += "\nCOMPANY KNOWLEDGE - ACTIVE MATTERS:\n" + json.dumps(ctx["matters"], ensure_ascii=False)[:15000] + "\n"
+    s += "\nCOMPANY KNOWLEDGE - ACTIVE MATTERS:\n" + json.dumps(ctx["matters"], ensure_ascii=False)[:7000] + "\n"
     if ctx.get("notes"):
         s += f"\nMD'S RUNNING NOTES:\n{ctx['notes']}\n"
     s += block("AN EARLIER DRAFT OF THIS QUARTER'S REPORT (worked through with the MD):", ctx["earlier_drafts"])
@@ -197,8 +219,17 @@ def _answers(ctx) -> str:
 
 
 def _call(client, prompt, max_tokens, label, model=None):
-    from core.llm import call_json
-    return call_json(client, prompt, max_tokens=max_tokens, label=label, model=model) or {}
+    """Model call that raises with the reason (the error goes to the private log, not the public one)."""
+    from core.llm import api_call_with_retry, robust_json_parse
+    msg = api_call_with_retry(client, model=model or None, max_tokens=max_tokens,
+                              messages=[{"role": "user", "content": prompt}]) if model else \
+        api_call_with_retry(client, max_tokens=max_tokens, messages=[{"role": "user", "content": prompt}])
+    raw = msg.content[0].text.strip()
+    try:
+        return robust_json_parse(raw) or {}
+    except Exception:
+        raise RuntimeError(f"{label}: could not read the model's answer "
+                           f"(stop_reason={getattr(msg, 'stop_reason', '?')}, {len(raw)} chars)")
 
 
 # ── step 1: brief ──────────────────────────────────────────────────────────
